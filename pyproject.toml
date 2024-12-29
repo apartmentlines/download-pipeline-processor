@@ -1,0 +1,27 @@
+[project]
+name = "download_pipeline_processor"
+version = "0.1.0"
+description = "A multi-threaded processing pipeline for downloading and processing files"
+authors = [
+    { name="Chad Phillips", email="chad@apartmentlines.com" }
+]
+license = { text="MIT" }
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31.0",
+    "tenacity>=8.2.3",
+]
+
+[project.scripts]
+download-pipeline-processor = "download_pipeline_processor.processing_pipeline:main"
+
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+"download_pipeline_processor" = ["py.typed", "files-test.json"]
