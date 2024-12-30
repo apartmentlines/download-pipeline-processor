@@ -8,6 +8,10 @@ import argparse
 import importlib
 import json
 import logging
+import os
+
+# Module level logger for non-class logging
+logger = logging.getLogger(__name__)
 import queue
 import random
 import tempfile
@@ -26,7 +30,14 @@ from .dummy_processor import DummyProcessor
 from .dummy_post_processor import DummyPostProcessor
 
 
-from .constants import DEFAULT_PROCESSING_LIMIT, DEFAULT_DOWNLOAD_QUEUE_SIZE, DEFAULT_MAX_RETRIES, DOWNLOAD_TIMEOUT
+from .constants import (
+    DEFAULT_PROCESSING_LIMIT,
+    DEFAULT_DOWNLOAD_QUEUE_SIZE,
+    DEFAULT_MAX_RETRIES,
+    DOWNLOAD_TIMEOUT,
+    DEFAULT_QUEUE_TIMEOUT,
+    NO_SLEEP_ENV_VAR
+)
 
 
 class ProcessingPipeline:
@@ -69,11 +80,7 @@ class ProcessingPipeline:
 
         self.post_processing_queue: queue.Queue[Any] = queue.Queue()
 
-        log_level = logging.DEBUG if debug else logging.INFO
-        logging.basicConfig(
-            level=log_level,
-            format="%(asctime)s [%(threadName)s] %(levelname)s: %(message)s",
-        )
+        self.log = self._setup_logging(self.debug)
 
     def populate_download_queue(self, file_list: List[FileData]) -> None:
         """Producer that enqueues files for download.
@@ -81,9 +88,9 @@ class ProcessingPipeline:
         :param file_list: List of FileData objects to process
         """
         for file_data in file_list:
-            logging.debug(f"Adding {file_data.name} to download queue.")
+            self.log.debug(f"Adding {file_data.name} to download queue.")
             self.download_queue.put(file_data)
-        logging.info("Finished populating download queue.")
+        self.log.info("Finished populating download queue.")
 
     def download_files(self) -> None:
         try:
@@ -95,12 +102,12 @@ class ProcessingPipeline:
                     self.handle_download(file_data)
                     self.downloaded_queue.put(file_data)
                     if self.downloaded_queue.full():
-                        logging.debug("Downloaded queue is full - downloader will block")
+                        self.log.debug("Downloaded queue is full - downloader will block")
                 except Exception as e:
-                    logging.error(f"Failed to download {file_data.name}: {e}")
+                    self.log.error(f"Failed to download {file_data.name}: {e}")
         finally:
             self.downloaded_queue.put(None)
-            logging.info("Exiting download thread.")
+            self.log.info("Exiting download thread.")
 
     def handle_download(self, file_data: FileData) -> None:
         """Handle the download of a file, either simulated or actual.
@@ -110,26 +117,18 @@ class ProcessingPipeline:
         if self.simulate_downloads:
             self.simulate_download(file_data)
         else:
-            self.perform_actual_download(file_data)
+            self.download_file(file_data)
 
     def simulate_download(self, file_data: FileData) -> None:
         """Simulate a download by sleeping and setting a local path.
 
         :param file_data: FileData object containing file information
         """
-        logging.debug(f"Simulating download of {file_data.name} from {file_data.url}")
-        time.sleep(random.uniform(1, 3))
+        self.log.debug(f"Simulating download of {file_data.name} from {file_data.url}")
+        if not os.getenv(NO_SLEEP_ENV_VAR):
+            time.sleep(random.uniform(1, 3))
         file_data.local_path = Path(file_data.name)
-        logging.info(f"Simulated download of {file_data.name}")
-
-    def perform_actual_download(self, file_data: FileData) -> None:
-        """Perform an actual download of the file.
-
-        :param file_data: FileData object containing file information
-        """
-        local_path = self.create_cached_download_filepath(file_data)
-        file_data.local_path = local_path
-        self.download_file(file_data)
+        self.log.info(f"Simulated download of {file_data.name}")
 
     @retry(
         stop=stop_after_attempt(DEFAULT_MAX_RETRIES),
@@ -137,14 +136,18 @@ class ProcessingPipeline:
         reraise=True,
     )
     def download_file(self, file_data: FileData) -> None:
+        temp_path = self.create_cached_download_filepath(file_data)
         try:
             response = requests.get(file_data.url, timeout=DOWNLOAD_TIMEOUT)
             response.raise_for_status()
-            with open(file_data.local_path, "wb") as f:
+            with open(temp_path, "wb") as f:
                 f.write(response.content)
-            logging.info(f"Downloaded {file_data.name} from {file_data.url} to {file_data.local_path}")
+            file_data.local_path = temp_path
+            self.log.info(f"Downloaded {file_data.name} from {file_data.url} to {file_data.local_path}")
         except Exception as e:
-            logging.warning(f"Error downloading {file_data.name}: {e}. Retrying...")
+            if temp_path.exists():
+                temp_path.unlink()
+            self.log.warning(f"Error downloading {file_data.name}: {e}. Retrying...")
             raise
 
     def create_cached_download_filepath(self, file_data: FileData) -> Path:
@@ -171,24 +174,34 @@ class ProcessingPipeline:
         if not self.simulate_downloads and file_data.local_path and file_data.local_path.exists():
             try:
                 file_data.local_path.unlink()
-                logging.debug(f"Deleted cached file: {file_data.local_path}")
+                self.log.debug(f"Deleted cached file: {file_data.local_path}")
             except Exception as e:
-                logging.warning(f"Failed to delete cached file {file_data.local_path}: {e}")
+                self.log.warning(f"Failed to delete cached file {file_data.local_path}: {e}")
 
     def processing_consumer(self) -> None:
         """Consumer that pulls from downloaded_queue and submits processing tasks."""
+        file_count = 0
+        active_futures = []
         while not self.shutdown_event.is_set():
+            active_futures = [f for f in active_futures if not f.done()]
             try:
                 file_data = self.downloaded_queue.get()
                 if file_data is None:
-                    logging.info("All files submitted for processing.")
+                    self.log.info(f"All {file_count} files submitted for processing.")
                     break
-                self.executor.submit(self.process_file, file_data)
-                logging.debug(f"Submitted processing task for {file_data.name}")
+                file_count += 1
+                future = self.executor.submit(self.process_file, file_data)
+                active_futures.append(future)
+                self.log.debug(f"Submitted processing task for {file_data.name}. Active tasks: {len(active_futures)}")
             except Exception as e:
-                logging.error(f"Error processing downloaded file: {e}")
+                self.log.error(f"Error processing downloaded file: {e}")
+        for future in active_futures:
+            try:
+                future.result()
+            except Exception as e:
+                self.log.error(f"Error in processing task: {e}")
 
-        logging.info("Exiting processing thread.")
+        self.log.info("Exiting processing thread.")
 
     def process_file(self, file_data: FileData) -> None:
         """Processing function, executed by the ThreadPoolExecutor.
@@ -197,32 +210,56 @@ class ProcessingPipeline:
         """
         try:
             if self.shutdown_event.is_set():
-                logging.debug(f"Shutdown event set. Skipping processing for {file_data.name}")
+                self.log.debug(f"Shutdown event set. Skipping processing for {file_data.name}")
                 return
             processor = self.processor_class()
-            logging.debug(f"Starting processing for {file_data.name}")
+            self.log.debug(f"Starting processing for {file_data.name}")
             processing_result = processor.process(file_data)
-            logging.info(f"Finished processing for {file_data.name}")
+            self.log.info(f"Finished processing for {file_data.name}")
             self.post_processing_queue.put(processing_result)
-            logging.debug(f"Enqueued processing result for {file_data.name} to post-processing queue")
+            self.log.debug(f"Enqueued processing result for {file_data.name} to post-processing queue")
             self.delete_cached_download_file(file_data)
         except Exception as e:
-            logging.error(f"Error processing {file_data.name}: {e}")
+            self.log.error(f"Error processing {file_data.name}: {e}")
 
     def post_processor(self) -> None:
         """Process the processing results from the post-processing queue."""
         while not self.shutdown_event.is_set() or not self.post_processing_queue.empty():
             try:
-                result = self.post_processing_queue.get(timeout=1)
+                result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
                 post_processor = self.post_processor_class()
-                logging.debug(f"Starting post-processing for result: {result}")
+                self.log.debug(f"Starting post-processing for result: {result}")
                 post_processor.post_process(result)
-                logging.info(f"Finished post-processing for result: {result}")
+                self.log.info(f"Finished post-processing for result: {result}")
             except queue.Empty:
                 continue
             except Exception as e:
-                logging.error(f"Error in post-processing: {e}")
-        logging.info("Exiting post-processing thread.")
+                self.log.error(f"Error in post-processing: {e}")
+        self.log.info("Exiting post-processing thread.")
+
+    def _setup_logging(self, debug: bool) -> logging.Logger:
+        """
+        Setup instance-specific logger.
+
+        :param debug: Whether to enable debug logging
+        :return: Configured logger instance
+        """
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG if debug else logging.INFO)
+        logger.propagate = False  # Prevent propagation to root logger
+
+        # Remove any existing handlers
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+
+        # Add our handler
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(threadName)s] %(levelname)s: %(message)s")
+        )
+        logger.addHandler(handler)
+
+        return logger
 
     def create_file_data(self, file_dict: dict) -> FileData:
         """Create a FileData object from a dictionary, using defaults for optional missing fields.
@@ -268,16 +305,16 @@ class ProcessingPipeline:
         :return: List of FileData objects
         :raises Exception: If file cannot be loaded or parsed
         """
-        logging.info(f"Loading files from {file_path}")
+        self.log.info(f"Loading files from {file_path}")
         try:
             with open(file_path) as f:
                 file_data = json.load(f)
                 return self._load_files_from_list(file_data)
         except KeyError as e:
-            logging.error(f"Invalid file entry: {str(e)}")
+            self.log.error(f"Invalid file entry: {str(e)}")
             exit(1)
         except Exception as e:
-            logging.error(f"Error loading JSON file: {e}")
+            self.log.error(f"Error loading JSON file: {e}")
             raise
 
     def _load_files_from_list(self, file_list: List[dict]) -> List[FileData]:
@@ -297,12 +334,12 @@ class ProcessingPipeline:
         :param input_data: Either a Path to a JSON file or a list of dicts
         :return: Exit code (0 for success, non-zero for failure)
         """
-        logging.info("Starting processing pipeline...")
+        self.log.info("Starting processing pipeline...")
 
         try:
             file_list = self._prepare_file_list(input_data)
         except TypeError as e:
-            logging.error(e)
+            logger.error(e)
             return 1
 
         post_processor_thread = threading.Thread(
@@ -329,14 +366,23 @@ class ProcessingPipeline:
             processing_thread.start()
 
             try:
-
                 self.populate_download_queue(file_list)
                 self.download_queue.put(None)  # Signal that no more files will be added
 
                 download_thread.join()
                 processing_thread.join()
+
+                # Signal the post_processor to shutdown
+                self.shutdown_event.set()
+                self.log.debug("Signaled shutdown event.")
+
+                post_processor_thread.join()
+
+                self.log.info("Pipeline completed successfully.")
+                return 0
+
             except KeyboardInterrupt:
-                logging.info("Received interrupt signal. Shutting down gracefully...")
+                self.log.info("Received interrupt signal. Shutting down gracefully...")
                 self.shutdown_event.set()
 
                 download_thread.join()
@@ -345,17 +391,8 @@ class ProcessingPipeline:
 
                 return 130
             except Exception as e:
-                logging.error(f"Pipeline failed: {e}")
+                self.log.error(f"Pipeline failed: {e}")
                 return 1
-
-        # Signal the post_processor to shutdown
-        self.shutdown_event.set()
-        logging.debug("Signaled shutdown event.")
-
-        post_processor_thread.join()
-
-        logging.info("Pipeline completed successfully.")
-        return 0
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -380,15 +417,21 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help="Custom post-processing class in 'package:ClassName' format",
     )
+    def positive_int(value):
+        ivalue = int(value)
+        if ivalue <= 0:
+            raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
+        return ivalue
+
     parser.add_argument(
         "--processing-limit",
-        type=int,
+        type=positive_int,
         default=DEFAULT_PROCESSING_LIMIT,
         help="Maximum concurrent processing threads, default %(default)s",
     )
     parser.add_argument(
         "--download-queue-size",
-        type=int,
+        type=positive_int,
         default=DEFAULT_DOWNLOAD_QUEUE_SIZE,
         help="Maximum size of downloaded files queue, default %(default)s",
     )
@@ -444,14 +487,14 @@ def main() -> int:
         try:
             processor_class = validate_processor_class(args.processor, BaseProcessor)
         except RuntimeError as e:
-            logging.error(e)
+            logger.error(e)
             return 1
 
     if args.post_processor:
         try:
             post_processor_class = validate_processor_class(args.post_processor, BasePostProcessor)
         except RuntimeError as e:
-            logging.error(e)
+            logger.error(e)
             return 1
 
     # Create pipeline with validated classes
