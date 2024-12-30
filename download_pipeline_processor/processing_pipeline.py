@@ -465,7 +465,7 @@ def main() -> int:
         debug=args.debug,
     )
 
-    return pipeline.run(args.files)
+    return pipeline.run(Path(args.files))
 
 
 if __name__ == "__main__":
