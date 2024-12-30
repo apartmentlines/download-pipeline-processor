@@ -32,26 +32,53 @@ Key Features:
 
 ## 3. Usage
 
-### Input File Format
+### Input Formats
 
-To process a list of files, provide a JSON file containing the metadata for all files in the following format:
+The pipeline supports two input formats:
 
-```json
-[
-    {
-        "id": "unique_id",          // Optional, string or int
-        "name": "file_name",        // Optional, string
-        "url": "https://example.com/file.txt"  // Required
-    }
-]
-```
+1. **JSON File** - Provide a path to a JSON file containing the metadata for all files:
+   ```json
+   [
+       {
+           "id": "unique_id",          // Optional, string or int
+           "name": "file_name",        // Optional, string
+           "url": "https://example.com/file.txt"  // Required
+       }
+   ]
+   ```
 
-### Basic Usage
+2. **Python List of Dicts** - Provide a list of dictionaries containing the file metadata:
+   ```python
+   [
+       {"id": "file1", "name": "example.txt", "url": "https://example.com/file1.txt"},
+       {"url": "https://example.com/file2.txt"}
+   ]
+   ```
 
-Run the pipeline with a JSON file containing files to process:
+Both formats require at minimum a `url` field for each file. The `id` and `name` fields are optional.
+
+### Usage
+
+**Command Line Interface** (requires JSON file):
 
 ```bash
 download-pipeline-processor --files path/to/files.json
+```
+
+**Programmatic Usage** (supports both formats):
+
+```python
+# Using a JSON file
+pipeline = ProcessingPipeline()
+pipeline.run(Path("path/to/files.json"))
+
+# Using a list of dicts
+file_list = [
+    {"id": "file1", "name": "example.txt", "url": "https://example.com/file1.txt"},
+    {"url": "https://example.com/file2.txt"}
+]
+pipeline = ProcessingPipeline()
+pipeline.run(file_list)
 ```
 
 To run a full simulation of the pipeline:

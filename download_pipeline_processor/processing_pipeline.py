@@ -16,7 +16,7 @@ import time
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, List, Optional, Type
+from typing import Any, List, Optional, Type, Union
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .file_data import FileData
@@ -245,8 +245,24 @@ class ProcessingPipeline:
         )
 
 
-    def load_files(self, file_path: Path) -> List[FileData]:
-        """Load and parse the JSON file containing files to process.
+    def _prepare_file_list(self, input_data: Union[Path, List[dict]]) -> List[FileData]:
+        """
+        Prepare a list of FileData objects from either a Path to a JSON file or a list of dicts.
+
+        :param input_data: Either a Path to a JSON file or a list of dicts
+        :return: List of FileData objects
+        :raises TypeError: If input_data is neither a Path nor a list of dicts
+        """
+        if isinstance(input_data, Path):
+            return self._load_files_from_path(input_data)
+        elif isinstance(input_data, list):
+            return self._load_files_from_list(input_data)
+        else:
+            raise TypeError("input_data must be either a Path or a list of dicts")
+
+    def _load_files_from_path(self, file_path: Path) -> List[FileData]:
+        """
+        Load and parse the JSON file containing files to process.
 
         :param file_path: Path to JSON file
         :return: List of FileData objects
@@ -256,7 +272,7 @@ class ProcessingPipeline:
         try:
             with open(file_path) as f:
                 file_data = json.load(f)
-                return [self.create_file_data(item) for item in file_data]
+                return self._load_files_from_list(file_data)
         except KeyError as e:
             logging.error(f"Invalid file entry: {str(e)}")
             exit(1)
@@ -264,15 +280,30 @@ class ProcessingPipeline:
             logging.error(f"Error loading JSON file: {e}")
             raise
 
-    def run(self, file_path: Path) -> int:
-        """Run the processing pipeline with the given file list.
+    def _load_files_from_list(self, file_list: List[dict]) -> List[FileData]:
+        """
+        Convert a list of dicts into a list of FileData objects.
 
-        :param file_path: Path to JSON file containing files to process
+        :param file_list: List of dicts containing file information
+        :return: List of FileData objects
+        :raises KeyError: If URL is not provided in any of the input dicts
+        """
+        return [self.create_file_data(item) for item in file_list]
+
+    def run(self, input_data: Union[Path, List[dict]]) -> int:
+        """
+        Run the processing pipeline with the given input data.
+
+        :param input_data: Either a Path to a JSON file or a list of dicts
         :return: Exit code (0 for success, non-zero for failure)
         """
         logging.info("Starting processing pipeline...")
 
-        file_list = self.load_files(file_path)
+        try:
+            file_list = self._prepare_file_list(input_data)
+        except TypeError as e:
+            logging.error(e)
+            return 1
 
         post_processor_thread = threading.Thread(
             target=self.post_processor,
