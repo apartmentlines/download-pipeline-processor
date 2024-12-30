@@ -1,6 +1,7 @@
 # Download Pipeline Processor
 
-## 1. Project Overview
+
+## Project Overview
 
 The Download Pipeline Processor is a multi-threaded processing system designed to efficiently handle downloading a batch of files and running them through some kind of processing. It provides a flexible framework for:
 
@@ -17,20 +18,24 @@ Key Features:
 - Temporary file caching system
 - Simulation mode for testing
 
-## 2. Installation
+
+## Installation
 
 ### Prerequisites
+
 - Python 3.9 or higher
 - Required packages: `requests`, `tenacity`
 
 ### Installation Steps
+
 1. Clone the repository
 2. Install the package in development mode:
    ```bash
    pip install -e .
    ```
 
-## 3. Usage
+
+## Usage
 
 ### Input Formats
 
@@ -57,7 +62,7 @@ The pipeline supports two input formats:
 
 Both formats require at minimum a `url` field for each file. The `id` and `name` fields are optional.
 
-### Usage
+### Executing
 
 **Command Line Interface** (requires JSON file):
 
@@ -91,7 +96,8 @@ download-pipeline-processor --files path/to/files.json --simulate-downloads
 
 Run `download-pipeline-processor` with the `--help` argument for a description of all arguments.
 
-## 4. Extending the Pipeline
+
+## Extending the Pipeline
 
 ### Creating Custom Processors
 
@@ -129,7 +135,8 @@ class CustomPostProcessor(BasePostProcessor):
         # Custom post-processing logic
 ```
 
-## 5. Architecture Overview
+
+## Architecture Overview
 
 The pipeline follows this workflow:
 
@@ -144,7 +151,29 @@ The pipeline follows this workflow:
    - Add results to the post-processing queue
 6. Post-processor handles the final results
 
-## 9. Troubleshooting
+
+## Testing
+
+### Running Tests
+
+To run the test suite:
+
+1. Install development dependencies:
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+2. Run pytest:
+   ```bash
+   pytest
+   ```
+
+### Test Environment
+
+Tests use temporary directories for file operations and mock network calls by default. The environment variable `PIPELINE_NO_SLEEP` can be set to skip simulated processing delays during testing.
+
+
+## Troubleshooting
 
 ### Common Issues
 
