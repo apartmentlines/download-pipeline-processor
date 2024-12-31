@@ -6,10 +6,10 @@ from .dummy_post_processor import DummyPostProcessor
 from .processing_pipeline import ProcessingPipeline
 
 __all__ = [
-    'FileData',
-    'BaseProcessor',
-    'BasePostProcessor',
-    'DummyProcessor',
-    'DummyPostProcessor',
-    'ProcessingPipeline',
+    "FileData",
+    "BaseProcessor",
+    "BasePostProcessor",
+    "DummyProcessor",
+    "DummyPostProcessor",
+    "ProcessingPipeline",
 ]

@@ -4,10 +4,8 @@ import logging
 import os
 import pytest
 import requests
-import queue
 import subprocess
 import threading
-import time
 from .test_utils import MockRequestUtils
 from pathlib import Path
 from unittest.mock import patch
@@ -23,7 +21,7 @@ from .test_processors import (
     FileWritingProcessor,
     FileWritingPostProcessor,
     ErrorProcessor,
-    ErrorPostProcessor
+    ErrorPostProcessor,
 )
 
 
@@ -43,14 +41,11 @@ class TestEdgeCasesAndErrorHandling:
         result = pipeline.run(empty_json_file)
         assert result == 0
 
-
     @patch("time.sleep")
     def test_invalid_urls(self, mock_sleep, pipeline, monkeypatch):
         """Test pipeline handles invalid URLs appropriately."""
         test_file = FileData(
-            id="1",
-            name="test1.txt",
-            url="https://invalid-url.com/test1.txt"
+            id="1", name="test1.txt", url="https://invalid-url.com/test1.txt"
         )
 
         # Mock requests.get to simulate a connection error
@@ -92,7 +87,7 @@ class TestEdgeCasesAndErrorHandling:
         for mock_func, target in [
             (mock_download, "download_file"),
             (mock_process, "process"),
-            (mock_post_process, "post_process")
+            (mock_post_process, "post_process"),
         ]:
             with pytest.MonkeyPatch().context() as m:
                 if target == "download_file":
@@ -109,14 +104,13 @@ class TestEdgeCasesAndErrorHandling:
 class TestPipelineExecutionFlow:
     """Test the complete execution flow of the pipeline."""
 
-
     @patch("time.sleep")
     def test_end_to_end_execution(self, mock_sleep, pipeline):
         """Test complete pipeline execution with file artifacts."""
         # Create test data
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"},
-            {"id": "2", "name": "test2.txt", "url": "https://example.com/test2.txt"}
+            {"id": "2", "name": "test2.txt", "url": "https://example.com/test2.txt"},
         ]
 
         # Run pipeline
@@ -134,10 +128,22 @@ class TestPipelineExecutionFlow:
         assert (POST_PROCESSOR_OUTPUT_DIR / "processed_test2.txt").exists()
 
         # Verify content of artifacts
-        assert "Processed test1.txt" in (PROCESSOR_OUTPUT_DIR / "processed_test1.txt").read_text()
-        assert "Processed test2.txt" in (PROCESSOR_OUTPUT_DIR / "processed_test2.txt").read_text()
-        assert "Processed test1.txt" in (POST_PROCESSOR_OUTPUT_DIR / "processed_test1.txt").read_text()
-        assert "Processed test2.txt" in (POST_PROCESSOR_OUTPUT_DIR / "processed_test2.txt").read_text()
+        assert (
+            "Processed test1.txt"
+            in (PROCESSOR_OUTPUT_DIR / "processed_test1.txt").read_text()
+        )
+        assert (
+            "Processed test2.txt"
+            in (PROCESSOR_OUTPUT_DIR / "processed_test2.txt").read_text()
+        )
+        assert (
+            "Processed test1.txt"
+            in (POST_PROCESSOR_OUTPUT_DIR / "processed_test1.txt").read_text()
+        )
+        assert (
+            "Processed test2.txt"
+            in (POST_PROCESSOR_OUTPUT_DIR / "processed_test2.txt").read_text()
+        )
 
     @patch("time.sleep")
     def test_graceful_shutdown(self, mock_sleep, pipeline, tmp_path, monkeypatch):
@@ -161,7 +167,6 @@ class TestPipelineExecutionFlow:
         assert pipeline.post_processing_queue.empty()
 
 
-
 class TestPipelineInitialization:
     """Test ProcessingPipeline initialization."""
 
@@ -182,7 +187,7 @@ class TestPipelineInitialization:
             processing_limit=5,
             download_queue_size=20,
             simulate_downloads=True,
-            debug=True
+            debug=True,
         )
 
         assert pipeline.processor_class == FileWritingProcessor
@@ -218,7 +223,9 @@ class TestDownloadFunctionality:
 
     def test_create_cached_download_filepath(self, pipeline):
         """Test creation of cached download filepath."""
-        file_data = FileData(url="https://example.com/test.txt", id="123", name="test.txt")
+        file_data = FileData(
+            url="https://example.com/test.txt", id="123", name="test.txt"
+        )
         path = pipeline.create_cached_download_filepath(file_data)
         assert path.parent == pipeline.download_cache
         assert path.name.startswith("123_")
@@ -228,7 +235,9 @@ class TestDownloadFunctionality:
         """Test deletion of cached download file."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt", local_path=test_file)
+        file_data = FileData(
+            url="https://example.com/test.txt", name="test.txt", local_path=test_file
+        )
 
         # Test with simulate_downloads=True (should not delete)
         pipeline.simulate_downloads = True
@@ -256,8 +265,7 @@ class TestProcessingFunctionality:
     def test_process_file_with_error(self):
         """Test processing with error processor."""
         pipeline = ProcessingPipeline(
-            processor_class=ErrorProcessor,
-            simulate_downloads=True
+            processor_class=ErrorProcessor, simulate_downloads=True
         )
         file_data = FileData(url="https://example.com/test.txt", name="test.txt")
         pipeline.process_file(file_data)
@@ -291,7 +299,11 @@ class TestConcurrencyAndThreading:
         """Test that downloads and processing occur concurrently."""
         # Create test data with enough files to trigger concurrency
         test_files = [
-            {"id": str(i), "name": f"test{i}.txt", "url": f"https://example.com/test{i}.txt"}
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
             for i in range(5)
         ]
 
@@ -300,7 +312,7 @@ class TestConcurrencyAndThreading:
             processor_class=FileWritingProcessor,
             post_processor_class=FileWritingPostProcessor,
             simulate_downloads=True,
-            processing_limit=2  # Limit concurrent processing
+            processing_limit=2,  # Limit concurrent processing
         )
 
         # Run pipeline
@@ -322,7 +334,11 @@ class TestConcurrencyAndThreading:
         """Test pipeline behavior when download queue is full."""
         # Create test data
         test_files = [
-            {"id": str(i), "name": f"test{i}.txt", "url": f"https://example.com/test{i}.txt"}
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
             for i in range(4)
         ]
 
@@ -332,7 +348,7 @@ class TestConcurrencyAndThreading:
             post_processor_class=FileWritingPostProcessor,
             simulate_downloads=True,
             download_queue_size=1,  # Minimal queue size
-            processing_limit=1      # Slow processing
+            processing_limit=1,  # Slow processing
         )
 
         # Run pipeline
@@ -357,7 +373,11 @@ class TestConcurrencyAndThreading:
 
         # Create test data
         test_files = [
-            {"id": str(i), "name": f"test{i}.txt", "url": f"https://example.com/test{i}.txt"}
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
             for i in range(10)
         ]
 
@@ -365,14 +385,11 @@ class TestConcurrencyAndThreading:
         pipeline = ProcessingPipeline(
             processor_class=SignalingProcessor,
             post_processor_class=FileWritingPostProcessor,
-            simulate_downloads=True
+            simulate_downloads=True,
         )
 
         # Start pipeline in a separate thread
-        pipeline_thread = threading.Thread(
-            target=pipeline.run,
-            args=(test_files,)
-        )
+        pipeline_thread = threading.Thread(target=pipeline.run, args=(test_files,))
         pipeline_thread.start()
 
         # Wait for processing to start
@@ -408,12 +425,15 @@ class TestCommandLineInterface:
         env = os.environ.copy()
         env[NO_SLEEP_ENV_VAR] = "1"
         result = subprocess.run(
-            ["download-pipeline-processor",
-             "--files", str(temp_json_file),
-             "--simulate-downloads"],
+            [
+                "download-pipeline-processor",
+                "--files",
+                str(temp_json_file),
+                "--simulate-downloads",
+            ],
             capture_output=True,
             text=True,
-            env=env
+            env=env,
         )
         assert result.returncode == 0
         assert "Pipeline completed successfully" in result.stderr
@@ -424,46 +444,69 @@ class TestCommandLineInterface:
         result = subprocess.run(
             ["python", "-m", "download_pipeline_processor.processing_pipeline"],
             capture_output=True,
-            text=True
+            text=True,
         )
         assert result.returncode != 0
         assert "error: the following arguments are required: --files" in result.stderr
 
         # Test invalid processor class format
         result = subprocess.run(
-            ["python", "-m", "download_pipeline_processor.processing_pipeline",
-             "--files", str(temp_json_file),
-             "--processor", "invalid_format",
-             "--simulate-downloads"],
+            [
+                "python",
+                "-m",
+                "download_pipeline_processor.processing_pipeline",
+                "--files",
+                str(temp_json_file),
+                "--processor",
+                "invalid_format",
+                "--simulate-downloads",
+            ],
             capture_output=True,
-            text=True
+            text=True,
         )
         assert result.returncode != 0
         assert "Cannot load class 'invalid_format'" in result.stderr
 
         # Test invalid processing limit
         result = subprocess.run(
-            ["python", "-m", "download_pipeline_processor.processing_pipeline",
-             "--files", str(temp_json_file),
-             "--processing-limit", "-1",
-             "--simulate-downloads"],
+            [
+                "python",
+                "-m",
+                "download_pipeline_processor.processing_pipeline",
+                "--files",
+                str(temp_json_file),
+                "--processing-limit",
+                "-1",
+                "--simulate-downloads",
+            ],
             capture_output=True,
-            text=True
+            text=True,
         )
         assert result.returncode != 0
-        assert "argument --processing-limit: -1 is not a positive integer" in result.stderr
+        assert (
+            "argument --processing-limit: -1 is not a positive integer" in result.stderr
+        )
 
         # Test invalid download queue size
         result = subprocess.run(
-            ["python", "-m", "download_pipeline_processor.processing_pipeline",
-             "--files", str(temp_json_file),
-             "--download-queue-size", "0",
-             "--simulate-downloads"],
+            [
+                "python",
+                "-m",
+                "download_pipeline_processor.processing_pipeline",
+                "--files",
+                str(temp_json_file),
+                "--download-queue-size",
+                "0",
+                "--simulate-downloads",
+            ],
             capture_output=True,
-            text=True
+            text=True,
         )
         assert result.returncode != 0
-        assert "argument --download-queue-size: 0 is not a positive integer" in result.stderr
+        assert (
+            "argument --download-queue-size: 0 is not a positive integer"
+            in result.stderr
+        )
 
 
 class TestFileLoading:
@@ -515,4 +558,4 @@ class TestFileLoading:
         assert len(file_list) == 1
         assert file_list[0].url == "https://example.com/test.txt"
         assert file_list[0].name == "test"  # Default from URL basename
-        assert file_list[0].id == "test"    # Default from basename
+        assert file_list[0].id == "test"  # Default from basename

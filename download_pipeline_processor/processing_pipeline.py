@@ -9,9 +9,6 @@ import importlib
 import json
 import logging
 import os
-
-# Module level logger for non-class logging
-logger = logging.getLogger(__name__)
 import queue
 import random
 import tempfile
@@ -29,7 +26,6 @@ from .base_post_processor import BasePostProcessor
 from .dummy_processor import DummyProcessor
 from .dummy_post_processor import DummyPostProcessor
 
-
 from .constants import (
     DEFAULT_PROCESSING_LIMIT,
     DEFAULT_DOWNLOAD_QUEUE_SIZE,
@@ -37,8 +33,11 @@ from .constants import (
     DEFAULT_MAX_RETRIES,
     DOWNLOAD_TIMEOUT,
     DEFAULT_QUEUE_TIMEOUT,
-    NO_SLEEP_ENV_VAR
+    NO_SLEEP_ENV_VAR,
 )
+
+# Module level logger for non-class logging
+logger = logging.getLogger(__name__)
 
 
 class ProcessingPipeline:
@@ -76,7 +75,9 @@ class ProcessingPipeline:
 
         self.executor: Optional[ThreadPoolExecutor] = None
         self.download_queue: queue.Queue[Optional[FileData]] = queue.Queue()
-        self.downloaded_queue: queue.Queue[Optional[FileData]] = queue.Queue(maxsize=self.download_queue_size)
+        self.downloaded_queue: queue.Queue[Optional[FileData]] = queue.Queue(
+            maxsize=self.download_queue_size
+        )
         self.shutdown_event: threading.Event = threading.Event()
 
         self.post_processing_queue: queue.Queue[Any] = queue.Queue()
@@ -103,7 +104,9 @@ class ProcessingPipeline:
                     self.handle_download(file_data)
                     self.downloaded_queue.put(file_data)
                     if self.downloaded_queue.full():
-                        self.log.debug("Downloaded queue is full - downloader will block")
+                        self.log.debug(
+                            "Downloaded queue is full - downloader will block"
+                        )
                 except Exception as e:
                     self.log.error(f"Failed to download {file_data.name}: {e}")
         finally:
@@ -144,7 +147,9 @@ class ProcessingPipeline:
             with open(temp_path, "wb") as f:
                 f.write(response.content)
             file_data.local_path = temp_path
-            self.log.info(f"Downloaded {file_data.name} from {file_data.url} to {file_data.local_path}")
+            self.log.info(
+                f"Downloaded {file_data.name} from {file_data.url} to {file_data.local_path}"
+            )
         except Exception as e:
             if temp_path.exists():
                 temp_path.unlink()
@@ -161,7 +166,7 @@ class ProcessingPipeline:
             dir=self.download_cache,
             delete=False,
             prefix=f"{file_data.id}_",
-            suffix=".tmp"
+            suffix=".tmp",
         )
         temp_file.close()
         local_path = Path(temp_file.name)
@@ -172,12 +177,18 @@ class ProcessingPipeline:
 
         :param file_data: FileData object containing file information
         """
-        if not self.simulate_downloads and file_data.local_path and file_data.local_path.exists():
+        if (
+            not self.simulate_downloads
+            and file_data.local_path
+            and file_data.local_path.exists()
+        ):
             try:
                 file_data.local_path.unlink()
                 self.log.debug(f"Deleted cached file: {file_data.local_path}")
             except Exception as e:
-                self.log.warning(f"Failed to delete cached file {file_data.local_path}: {e}")
+                self.log.warning(
+                    f"Failed to delete cached file {file_data.local_path}: {e}"
+                )
 
     def processing_consumer(self) -> None:
         """Consumer that pulls from downloaded_queue and submits processing tasks."""
@@ -193,7 +204,9 @@ class ProcessingPipeline:
                 file_count += 1
                 future = self.executor.submit(self.process_file, file_data)
                 active_futures.append(future)
-                self.log.debug(f"Submitted processing task for {file_data.name}. Active tasks: {len(active_futures)}")
+                self.log.debug(
+                    f"Submitted processing task for {file_data.name}. Active tasks: {len(active_futures)}"
+                )
             except Exception as e:
                 self.log.error(f"Error processing downloaded file: {e}")
         for future in active_futures:
@@ -211,21 +224,27 @@ class ProcessingPipeline:
         """
         try:
             if self.shutdown_event.is_set():
-                self.log.debug(f"Shutdown event set. Skipping processing for {file_data.name}")
+                self.log.debug(
+                    f"Shutdown event set. Skipping processing for {file_data.name}"
+                )
                 return
             processor = self.processor_class()
             self.log.debug(f"Starting processing for {file_data.name}")
             processing_result = processor.process(file_data)
             self.log.info(f"Finished processing for {file_data.name}")
             self.post_processing_queue.put(processing_result)
-            self.log.debug(f"Enqueued processing result for {file_data.name} to post-processing queue")
+            self.log.debug(
+                f"Enqueued processing result for {file_data.name} to post-processing queue"
+            )
             self.delete_cached_download_file(file_data)
         except Exception as e:
             self.log.error(f"Error processing {file_data.name}: {e}")
 
     def post_processor(self) -> None:
         """Process the processing results from the post-processing queue."""
-        while not self.shutdown_event.is_set() or not self.post_processing_queue.empty():
+        while (
+            not self.shutdown_event.is_set() or not self.post_processing_queue.empty()
+        ):
             try:
                 result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
                 post_processor = self.post_processor_class()
@@ -276,12 +295,7 @@ class ProcessingPipeline:
         basename = Path(url).stem
         file_id = file_dict.get("id", basename)
         name = file_dict.get("name", basename)
-        return FileData(
-            id=file_id,
-            name=name,
-            url=url
-        )
-
+        return FileData(id=file_id, name=name, url=url)
 
     def _prepare_file_list(self, input_data: Union[Path, List[dict]]) -> List[FileData]:
         """
@@ -418,6 +432,7 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help="Custom post-processing class in 'package:ClassName' format",
     )
+
     def positive_int(value):
         ivalue = int(value)
         if ivalue <= 0:
@@ -465,14 +480,17 @@ def validate_processor_class(class_path: str, base_class: Type) -> Type:
     :raises RuntimeError: If the class cannot be imported or doesn't inherit from base_class
     """
     try:
-        module_name, class_name = class_path.split(':')
+        module_name, class_name = class_path.split(":")
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
         if not issubclass(cls, base_class):
-            raise RuntimeError(f"The class '{class_path}' must inherit from {base_class.__name__}.")
+            raise RuntimeError(
+                f"The class '{class_path}' must inherit from {base_class.__name__}."
+            )
         return cls
     except (ValueError, ModuleNotFoundError, AttributeError) as e:
         raise RuntimeError(f"Cannot load class '{class_path}': {e}") from e
+
 
 def main() -> int:
     """Main function to run the processing pipeline.
@@ -493,7 +511,9 @@ def main() -> int:
 
     if args.post_processor:
         try:
-            post_processor_class = validate_processor_class(args.post_processor, BasePostProcessor)
+            post_processor_class = validate_processor_class(
+                args.post_processor, BasePostProcessor
+            )
         except RuntimeError as e:
             logger.error(e)
             return 1
@@ -513,4 +533,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-     exit(main())
+    exit(main())

@@ -3,7 +3,9 @@ import tempfile
 
 DEFAULT_PROCESSING_LIMIT = 3
 DEFAULT_DOWNLOAD_QUEUE_SIZE = 10
-DEFAULT_DOWNLOAD_CACHE = Path(tempfile.gettempdir()) / "processing-pipeline-download-cache"
+DEFAULT_DOWNLOAD_CACHE = (
+    Path(tempfile.gettempdir()) / "processing-pipeline-download-cache"
+)
 DEFAULT_MAX_RETRIES = 3
 DOWNLOAD_TIMEOUT = 30
 SIMULATE_MIN_PROCESS_TIME = 5

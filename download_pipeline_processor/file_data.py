@@ -6,6 +6,7 @@ from typing import Optional, Union
 @dataclass
 class FileData:
     """Dataclass representing a file to be processed."""
+
     url: str
     id: Optional[Union[str, int]] = None
     name: Optional[str] = None
