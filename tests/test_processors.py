@@ -13,7 +13,8 @@ from .test_constants import PROCESSOR_OUTPUT_DIR, POST_PROCESSOR_OUTPUT_DIR
 class FileWritingProcessor(BaseProcessor):
     """Test processor that writes files to track processing."""
 
-    def __init__(self) -> None:
+    def __init__(self, debug: bool = False) -> None:
+        super().__init__(debug=debug)
         self.output_dir = PROCESSOR_OUTPUT_DIR
 
     def process(self, file_data: FileData) -> str:
@@ -26,8 +27,9 @@ class FileWritingProcessor(BaseProcessor):
 class FileWritingPostProcessor(BasePostProcessor):
     """Test post-processor that writes files to track post-processing."""
 
-    def __init__(self) -> None:
+    def __init__(self, debug: bool = False) -> None:
         """Initialize with output directory from test constants."""
+        super().__init__(debug=debug)
         self.output_dir = POST_PROCESSOR_OUTPUT_DIR
 
     def post_process(self, result: str) -> None:

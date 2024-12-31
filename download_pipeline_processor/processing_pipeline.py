@@ -7,7 +7,7 @@ A multi-threaded processing pipeline that downloads and processes files.
 import argparse
 import importlib
 import json
-import logging
+from .logger import Logger
 import os
 import queue
 import random
@@ -36,8 +36,8 @@ from .constants import (
     NO_SLEEP_ENV_VAR,
 )
 
-# Module level logger for non-class logging
-logger = logging.getLogger(__name__)
+# Module level logger for CLI usage
+cli_logger = Logger("CLI")
 
 
 class ProcessingPipeline:
@@ -82,7 +82,7 @@ class ProcessingPipeline:
 
         self.post_processing_queue: queue.Queue[Any] = queue.Queue()
 
-        self.log = self._setup_logging(self.debug)
+        self.log = Logger(self.__class__.__name__, debug=self.debug)
 
     def populate_download_queue(self, file_list: List[FileData]) -> None:
         """Producer that enqueues files for download.
@@ -228,7 +228,7 @@ class ProcessingPipeline:
                     f"Shutdown event set. Skipping processing for {file_data.name}"
                 )
                 return
-            processor = self.processor_class()
+            processor = self.processor_class(debug=self.debug)
             self.log.debug(f"Starting processing for {file_data.name}")
             processing_result = processor.process(file_data)
             self.log.info(f"Finished processing for {file_data.name}")
@@ -247,7 +247,7 @@ class ProcessingPipeline:
         ):
             try:
                 result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
-                post_processor = self.post_processor_class()
+                post_processor = self.post_processor_class(debug=self.debug)
                 self.log.debug(f"Starting post-processing for result: {result}")
                 post_processor.post_process(result)
                 self.log.info(f"Finished post-processing for result: {result}")
@@ -256,30 +256,6 @@ class ProcessingPipeline:
             except Exception as e:
                 self.log.error(f"Error in post-processing: {e}")
         self.log.info("Exiting post-processing thread.")
-
-    def _setup_logging(self, debug: bool) -> logging.Logger:
-        """
-        Setup instance-specific logger.
-
-        :param debug: Whether to enable debug logging
-        :return: Configured logger instance
-        """
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.DEBUG if debug else logging.INFO)
-        logger.propagate = False  # Prevent propagation to root logger
-
-        # Remove any existing handlers
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-
-        # Add our handler
-        handler = logging.StreamHandler()
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(threadName)s] %(levelname)s: %(message)s")
-        )
-        logger.addHandler(handler)
-
-        return logger
 
     def create_file_data(self, file_dict: dict) -> FileData:
         """Create a FileData object from a dictionary, using defaults for optional missing fields.
@@ -354,7 +330,7 @@ class ProcessingPipeline:
         try:
             file_list = self._prepare_file_list(input_data)
         except TypeError as e:
-            logger.error(e)
+            cli_logger.error(e)
             return 1
 
         post_processor_thread = threading.Thread(
@@ -506,7 +482,7 @@ def main() -> int:
         try:
             processor_class = validate_processor_class(args.processor, BaseProcessor)
         except RuntimeError as e:
-            logger.error(e)
+            cli_logger.error(e)
             return 1
 
     if args.post_processor:
@@ -515,7 +491,7 @@ def main() -> int:
                 args.post_processor, BasePostProcessor
             )
         except RuntimeError as e:
-            logger.error(e)
+            cli_logger.error(e)
             return 1
 
     # Create pipeline with validated classes

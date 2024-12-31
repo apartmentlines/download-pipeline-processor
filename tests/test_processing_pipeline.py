@@ -170,6 +170,23 @@ class TestPipelineExecutionFlow:
 class TestPipelineInitialization:
     """Test ProcessingPipeline initialization."""
 
+    def test_logging_configuration(self, tmp_path):
+        # Test processor logging
+        processor = FileWritingProcessor(debug=True)
+        assert processor.log.level == logging.DEBUG
+
+        # Test post-processor logging
+        post_processor = FileWritingPostProcessor(debug=True)
+        assert post_processor.log.level == logging.DEBUG
+
+        # Test pipeline logging with file
+        pipeline = ProcessingPipeline(
+            processor_class=FileWritingProcessor,
+            post_processor_class=FileWritingPostProcessor,
+            debug=True,
+        )
+        assert pipeline.log.level == logging.DEBUG
+
     def test_default_initialization(self):
         """Test pipeline initializes with default parameters."""
         pipeline = ProcessingPipeline()
@@ -196,18 +213,6 @@ class TestPipelineInitialization:
         assert pipeline.download_queue_size == 20
         assert pipeline.simulate_downloads is True
         assert pipeline.debug is True
-
-    def test_logging_configuration(self):
-        """Test logging configuration works correctly."""
-        # Test debug mode
-        pipeline = ProcessingPipeline(debug=True)
-        assert pipeline.log.level == logging.DEBUG
-        assert len(pipeline.log.handlers) == 1
-        assert isinstance(pipeline.log.handlers[0], logging.StreamHandler)
-
-        # Test normal mode
-        pipeline = ProcessingPipeline(debug=False)
-        assert pipeline.log.level == logging.INFO
 
 
 class TestDownloadFunctionality:
