@@ -33,6 +33,7 @@ from .dummy_post_processor import DummyPostProcessor
 from .constants import (
     DEFAULT_PROCESSING_LIMIT,
     DEFAULT_DOWNLOAD_QUEUE_SIZE,
+    DEFAULT_DOWNLOAD_CACHE,
     DEFAULT_MAX_RETRIES,
     DOWNLOAD_TIMEOUT,
     DEFAULT_QUEUE_TIMEOUT,
@@ -49,7 +50,7 @@ class ProcessingPipeline:
         post_processor_class: Type[BasePostProcessor] = DummyPostProcessor,
         processing_limit: int = DEFAULT_PROCESSING_LIMIT,
         download_queue_size: int = DEFAULT_DOWNLOAD_QUEUE_SIZE,
-        download_cache: Path = Path(tempfile.gettempdir()) / "processing-pipeline-download-cache",
+        download_cache: Path = DEFAULT_DOWNLOAD_CACHE,
         simulate_downloads: bool = False,
         debug: bool = False,
     ):
@@ -438,7 +439,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--download-cache",
         type=Path,
-        default=Path(tempfile.gettempdir()) / "processing-pipeline-download-cache",
+        default=DEFAULT_DOWNLOAD_CACHE,
         help="Directory to cache downloaded files, default %(default)s",
     )
     parser.add_argument(
