@@ -232,7 +232,7 @@ class ProcessingPipeline:
             self.log.debug(f"Starting processing for {file_data.name}")
             processing_result = processor.process(file_data)
             self.log.info(f"Finished processing for {file_data.name}")
-            self.post_processing_queue.put(processing_result)
+            self.post_processing_queue.put((file_data, processing_result))
             self.log.debug(
                 f"Enqueued processing result for {file_data.name} to post-processing queue"
             )
@@ -246,11 +246,11 @@ class ProcessingPipeline:
             not self.shutdown_event.is_set() or not self.post_processing_queue.empty()
         ):
             try:
-                result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
+                file_data, result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
                 post_processor = self.post_processor_class(debug=self.debug)
-                self.log.debug(f"Starting post-processing for result: {result}")
+                self.log.debug(f"Starting post-processing for: {file_data.name}")
                 post_processor.post_process(result)
-                self.log.info(f"Finished post-processing for result: {result}")
+                self.log.info(f"Finished post-processing for: {file_data.name}")
             except queue.Empty:
                 continue
             except Exception as e:
