@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import Any
 
-from download_pipeline_processor.base_processor import BaseProcessor
-from download_pipeline_processor.base_post_processor import BasePostProcessor
+from download_pipeline_processor.processors.base_processor import BaseProcessor
+from download_pipeline_processor.processors.base_post_processor import BasePostProcessor
 from download_pipeline_processor.file_data import FileData
 
 from .test_constants import PROCESSOR_OUTPUT_DIR, POST_PROCESSOR_OUTPUT_DIR

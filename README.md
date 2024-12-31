@@ -109,7 +109,7 @@ To create a custom processor:
 Example:
 
 ```python
-from download_pipeline_processor.base_processor import BaseProcessor
+from download_pipeline_processor.processors.base_processor import BaseProcessor
 from download_pipeline_processor.file_data import FileData
 
 class CustomProcessor(BaseProcessor):
@@ -128,7 +128,7 @@ To create a custom post-processor:
 Example:
 
 ```python
-from download_pipeline_processor.base_post_processor import BasePostProcessor
+from download_pipeline_processor.processors.base_post_processor import BasePostProcessor
 
 class CustomPostProcessor(BasePostProcessor):
     def post_process(self, result: Any) -> None:

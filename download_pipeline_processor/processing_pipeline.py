@@ -21,10 +21,10 @@ from typing import Any, List, Optional, Type, Union
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .file_data import FileData
-from .base_processor import BaseProcessor
-from .base_post_processor import BasePostProcessor
-from .dummy_processor import DummyProcessor
-from .dummy_post_processor import DummyPostProcessor
+from .processors.base_processor import BaseProcessor
+from .processors.base_post_processor import BasePostProcessor
+from .processors.dummy_processor import DummyProcessor
+from .processors.dummy_post_processor import DummyPostProcessor
 
 from .constants import (
     DEFAULT_PROCESSING_LIMIT,
