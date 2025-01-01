@@ -6,6 +6,8 @@ import pytest
 import requests
 import subprocess
 import threading
+from download_pipeline_processor.processors.base_pre_processor import BasePreProcessor
+from download_pipeline_processor.processors.dummy_pre_processor import DummyPreProcessor
 from .test_utils import MockRequestUtils
 from pathlib import Path
 from unittest.mock import patch
@@ -107,17 +109,36 @@ class TestPipelineExecutionFlow:
     @patch("time.sleep")
     def test_end_to_end_execution(self, mock_sleep, pipeline):
         """Test complete pipeline execution with file artifacts."""
+        # Track pre-processing calls
+        pre_processed_files = set()
+
+        class TrackingPreProcessor(DummyPreProcessor):
+            def pre_process(self, file_data: FileData) -> FileData:
+                pre_processed_files.add(file_data.name)
+                return super().pre_process(file_data)
+
         # Create test data
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"},
             {"id": "2", "name": "test2.txt", "url": "https://example.com/test2.txt"},
         ]
 
+        # Create pipeline with tracking pre-processor
+        pipeline = ProcessingPipeline(
+            pre_processor_class=TrackingPreProcessor,
+            processor_class=FileWritingProcessor,
+            post_processor_class=FileWritingPostProcessor,
+            simulate_downloads=True,
+        )
+
         # Run pipeline
         result = pipeline.run(test_files)
 
         # Verify pipeline completed successfully
         assert result == 0
+
+        # Verify all files went through pre-processing
+        assert pre_processed_files == {"test1.txt", "test2.txt"}
 
         # Check for processing artifacts
         assert (PROCESSOR_OUTPUT_DIR / "processed_test1.txt").exists()
@@ -277,6 +298,65 @@ class TestProcessingFunctionality:
         assert pipeline.post_processing_queue.empty()
 
 
+class TestPreProcessingFunctionality:
+    """Test pre-processing functionality of the pipeline."""
+
+    def test_pre_processor_handles_file(self, pipeline):
+        """Test pre-processor processes files correctly."""
+        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        pre_processor = pipeline.pre_processor_class(debug=True)
+        processed_data = pre_processor.pre_process(file_data)
+        assert processed_data == file_data  # For DummyPreProcessor
+
+    @patch("time.sleep")
+    def test_pre_processing_queue_behavior(self, mock_sleep, pipeline):
+        """Test pre-processing queue size limits are respected."""
+        # Create test data with more files than queue size
+        test_files = [
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
+            for i in range(pipeline.pre_processing_queue_size + 5)
+        ]
+
+        # Run pipeline
+        result = pipeline.run(test_files)
+        assert result == 0
+
+        # Verify all files were processed despite queue constraints
+        processed_files = list(PROCESSOR_OUTPUT_DIR.iterdir())
+        assert len(processed_files) == len(test_files)
+
+    def test_pre_processor_error_handling(self):
+        """Test pre-processor handles errors gracefully."""
+
+        class ErrorPreProcessor(BasePreProcessor):
+            def pre_process(self, file_data: FileData) -> FileData:
+                raise ValueError(f"Simulated error pre-processing {file_data.name}")
+
+        pipeline = ProcessingPipeline(
+            pre_processor_class=ErrorPreProcessor, simulate_downloads=True
+        )
+
+        test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
+        result = pipeline.run(test_files)
+
+        # Pipeline should complete despite pre-processing errors
+        assert result == 0
+
+    def test_pre_processing_queue_size_configuration(self):
+        """Test that pre-processing queue size can be configured."""
+        custom_size = 5
+        pipeline = ProcessingPipeline(
+            pre_processing_queue_size=custom_size, simulate_downloads=True
+        )
+
+        # Verify queue was created with correct size
+        assert pipeline.pre_processed_queue.maxsize == custom_size
+
+
 class TestPostProcessingFunctionality:
     """Test post-processing functionality of the pipeline."""
 
@@ -302,6 +382,14 @@ class TestConcurrencyAndThreading:
     @patch("time.sleep")
     def test_concurrent_downloads_and_processing(self, mock_sleep):
         """Test that downloads and processing occur concurrently."""
+        # Track pre-processing operations
+        pre_processed_files = set()
+
+        class TrackingPreProcessor(DummyPreProcessor):
+            def pre_process(self, file_data: FileData) -> FileData:
+                pre_processed_files.add(file_data.name)
+                return super().pre_process(file_data)
+
         # Create test data with enough files to trigger concurrency
         test_files = [
             {
@@ -314,6 +402,7 @@ class TestConcurrencyAndThreading:
 
         # Create pipeline with small delays to ensure overlap
         pipeline = ProcessingPipeline(
+            pre_processor_class=TrackingPreProcessor,
             processor_class=FileWritingProcessor,
             post_processor_class=FileWritingPostProcessor,
             simulate_downloads=True,
@@ -325,6 +414,10 @@ class TestConcurrencyAndThreading:
 
         # Verify successful completion
         assert result == 0
+
+        # Verify all files went through pre-processing
+        assert len(pre_processed_files) == 5
+        assert all(f"test{i}.txt" in pre_processed_files for i in range(5))
 
         # Verify all files were processed
         processed_files = list(PROCESSOR_OUTPUT_DIR.iterdir())

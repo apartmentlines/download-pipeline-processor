@@ -6,14 +6,15 @@
 The Download Pipeline Processor is a multi-threaded processing system designed to efficiently handle downloading a batch of files and running them through some kind of processing. It provides a flexible framework for:
 
 - Managing concurrent downloads
-- Processing downloaded files
+- Pre-processing/processing downloaded files
 - Post-processing results
 - Simulating downloads for testing
 
 Key Features:
-- Customizable processors and post-processors
-- Download queue with size limit
-- Thread pool for parallel processing of files with size limit
+- Customizable pre-processors, processors and post-processors
+- Download queue (configurable size limit)
+- Pre-processing queue (configurable size limit)
+- Thread pool for parallel processing of files (configurable size limit)
 - Automatic retry mechanism for failed downloads
 - Temporary file caching system
 - Simulation mode for testing
@@ -99,6 +100,25 @@ Run `download-pipeline-processor` with the `--help` argument for a description o
 
 ## Extending the Pipeline
 
+### Creating Custom Pre-Processors
+
+To create a custom pre-processor:
+
+1. Inherit from `BasePreProcessor`
+2. Implement the `pre_process` method
+
+Example:
+
+```python
+from download_pipeline_processor.processors.base_pre_processor import BasePreProcessor
+from download_pipeline_processor.file_data import FileData
+
+class CustomPreProcessor(BasePreProcessor):
+    def pre_process(self, file_data: FileData) -> FileData:
+        # Custom pre-processing logic
+        return file_data
+```
+
 ### Creating Custom Processors
 
 To create a custom processor:
@@ -145,11 +165,14 @@ The pipeline follows this workflow:
 3. Downloader thread processes the queue:
    - Either perform actual downloads or simulate them
    - Store files in temporary cache
-4. Downloaded files are added to the processing queue
-5. Processor threads:
+4. Downloaded files are added to the pre-processing queue
+5. Pre-processor thread:
+   - Pre-processes files using the configured pre-processor
+   - Add files to the processing queue
+6. Processor threads:
    - Process files using the configured processor
    - Add results to the post-processing queue
-6. Post-processor handles the final results
+7. Post-processor handles the final results
 
 
 ## Testing

@@ -23,8 +23,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from .file_data import FileData
 from .processors.base_processor import BaseProcessor
 from .processors.base_post_processor import BasePostProcessor
+from .processors.base_pre_processor import BasePreProcessor
 from .processors.dummy_processor import DummyProcessor
 from .processors.dummy_post_processor import DummyPostProcessor
+from .processors.dummy_pre_processor import DummyPreProcessor
 
 from .constants import (
     DEFAULT_PROCESSING_LIMIT,
@@ -33,6 +35,7 @@ from .constants import (
     DEFAULT_MAX_RETRIES,
     DOWNLOAD_TIMEOUT,
     DEFAULT_QUEUE_TIMEOUT,
+    DEFAULT_PRE_PROCESSING_QUEUE_SIZE,
     NO_SLEEP_ENV_VAR,
 )
 
@@ -45,10 +48,12 @@ class ProcessingPipeline:
 
     def __init__(
         self,
+        pre_processor_class: Type[BasePreProcessor] = DummyPreProcessor,
         processor_class: Type[BaseProcessor] = DummyProcessor,
         post_processor_class: Type[BasePostProcessor] = DummyPostProcessor,
         processing_limit: int = DEFAULT_PROCESSING_LIMIT,
         download_queue_size: int = DEFAULT_DOWNLOAD_QUEUE_SIZE,
+        pre_processing_queue_size: int = DEFAULT_PRE_PROCESSING_QUEUE_SIZE,
         download_cache: Path = DEFAULT_DOWNLOAD_CACHE,
         simulate_downloads: bool = False,
         debug: bool = False,
@@ -56,17 +61,21 @@ class ProcessingPipeline:
         """
         Initialize the processing pipeline.
 
+        :param pre_processor_class: Class to use for pre-processing files
         :param processor_class: Class to use for processing files
         :param post_processor_class: Class to use for post-processing results
         :param processing_limit: Maximum concurrent processing threads
         :param download_queue_size: Maximum size of downloaded files queue
+        :param pre_processing_queue_size: Maximum size of pre-processed files queue
         :param simulate_downloads: Whether to simulate downloads
         :param debug: Enable debug logging
         """
+        self.pre_processor_class = pre_processor_class
         self.processor_class = processor_class
         self.post_processor_class = post_processor_class
         self.processing_limit = processing_limit
         self.download_queue_size = download_queue_size
+        self.pre_processing_queue_size = pre_processing_queue_size
         self.simulate_downloads = simulate_downloads
         self.debug = debug
 
@@ -77,6 +86,9 @@ class ProcessingPipeline:
         self.download_queue: queue.Queue[Optional[FileData]] = queue.Queue()
         self.downloaded_queue: queue.Queue[Optional[FileData]] = queue.Queue(
             maxsize=self.download_queue_size
+        )
+        self.pre_processed_queue: queue.Queue[Optional[FileData]] = queue.Queue(
+            maxsize=self.pre_processing_queue_size
         )
         self.shutdown_event: threading.Event = threading.Event()
 
@@ -190,6 +202,26 @@ class ProcessingPipeline:
                     f"Failed to delete cached file {file_data.local_path}: {e}"
                 )
 
+    def pre_processor(self) -> None:
+        try:
+            pre_processor = self.pre_processor_class(debug=self.debug)
+            while not self.shutdown_event.is_set():
+                file_data = self.downloaded_queue.get()
+                if file_data is None:
+                    break
+                try:
+                    self.log.debug(f"Pre-processing file: {file_data.name}")
+                    processed_data = pre_processor.pre_process(file_data)
+                    self.log.info(f"Finished pre-processing for: {file_data.name}")
+                    self.pre_processed_queue.put(processed_data)
+                    if self.pre_processed_queue.full():
+                        self.log.debug("Pre-processed queue is full - will block")
+                except Exception as e:
+                    self.log.error(f"Error pre-processing {file_data.name}: {e}")
+        finally:
+            self.pre_processed_queue.put(None)
+            self.log.info("Exiting pre-processing thread.")
+
     def processing_consumer(self) -> None:
         """Consumer that pulls from downloaded_queue and submits processing tasks."""
         file_count = 0
@@ -197,7 +229,7 @@ class ProcessingPipeline:
         while not self.shutdown_event.is_set():
             active_futures = [f for f in active_futures if not f.done()]
             try:
-                file_data = self.downloaded_queue.get()
+                file_data = self.pre_processed_queue.get()
                 if file_data is None:
                     self.log.info(f"All {file_count} files submitted for processing.")
                     break
@@ -344,6 +376,11 @@ class ProcessingPipeline:
             cli_logger.error(e)
             return 1
 
+        pre_processor_thread = threading.Thread(
+            target=self.pre_processor,
+            name="PreProcessor",
+            daemon=True,
+        )
         post_processor_thread = threading.Thread(
             target=self.post_processor,
             name="PostProcessor",
@@ -363,15 +400,17 @@ class ProcessingPipeline:
         with ThreadPoolExecutor(max_workers=self.processing_limit) as executor:
             self.executor = executor
 
-            post_processor_thread.start()
             download_thread.start()
+            pre_processor_thread.start()
             processing_thread.start()
+            post_processor_thread.start()
 
             try:
                 self.populate_download_queue(file_list)
                 self.download_queue.put(None)  # Signal that no more files will be added
 
                 download_thread.join()
+                pre_processor_thread.join()
                 processing_thread.join()
 
                 # Signal the post_processor to shutdown
@@ -388,6 +427,7 @@ class ProcessingPipeline:
                 self.shutdown_event.set()
 
                 download_thread.join()
+                pre_processor_thread.join()
                 processing_thread.join()
                 post_processor_thread.join()
 
@@ -408,6 +448,11 @@ def parse_arguments() -> argparse.Namespace:
         type=Path,
         required=True,
         help="Path to JSON file containing list of files to process",
+    )
+    parser.add_argument(
+        "--pre-processor",
+        type=str,
+        help="Custom pre-processing class in 'package:ClassName' format",
     )
     parser.add_argument(
         "--processor",
@@ -437,6 +482,12 @@ def parse_arguments() -> argparse.Namespace:
         type=positive_int,
         default=DEFAULT_DOWNLOAD_QUEUE_SIZE,
         help="Maximum size of downloaded files queue, default %(default)s",
+    )
+    parser.add_argument(
+        "--pre-processing-queue-size",
+        type=positive_int,
+        default=DEFAULT_PRE_PROCESSING_QUEUE_SIZE,
+        help="Maximum size of pre-processed files queue, default %(default)s",
     )
     parser.add_argument(
         "--download-cache",
@@ -486,8 +537,18 @@ def main() -> int:
     """
     args = parse_arguments()
 
+    pre_processor_class = DummyPreProcessor
     processor_class = DummyProcessor
     post_processor_class = DummyPostProcessor
+
+    if args.pre_processor:
+        try:
+            pre_processor_class = validate_processor_class(
+                args.pre_processor, BasePreProcessor
+            )
+        except RuntimeError as e:
+            cli_logger.error(e)
+            return 1
 
     if args.processor:
         try:
@@ -507,10 +568,12 @@ def main() -> int:
 
     # Create pipeline with validated classes
     pipeline = ProcessingPipeline(
+        pre_processor_class=pre_processor_class,
         processor_class=processor_class,
         post_processor_class=post_processor_class,
         processing_limit=args.processing_limit,
         download_queue_size=args.download_queue_size,
+        pre_processing_queue_size=args.pre_processing_queue_size,
         download_cache=args.download_cache,
         simulate_downloads=args.simulate_downloads,
         debug=args.debug,
