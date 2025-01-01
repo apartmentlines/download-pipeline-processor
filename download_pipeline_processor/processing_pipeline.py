@@ -246,7 +246,9 @@ class ProcessingPipeline:
             not self.shutdown_event.is_set() or not self.post_processing_queue.empty()
         ):
             try:
-                file_data, result = self.post_processing_queue.get(timeout=DEFAULT_QUEUE_TIMEOUT)
+                file_data, result = self.post_processing_queue.get(
+                    timeout=DEFAULT_QUEUE_TIMEOUT
+                )
                 post_processor = self.post_processor_class(debug=self.debug)
                 self.log.debug(f"Starting post-processing for: {file_data.name}")
                 post_processor.post_process(result)
@@ -259,6 +261,7 @@ class ProcessingPipeline:
 
     def create_file_data(self, file_dict: dict) -> FileData:
         """Create a FileData object from a dictionary, using defaults for optional missing fields.
+        Any additional fields in the dictionary will be stored in additional_fields.
 
         :param file_dict: Dictionary containing file information
         :return: FileData object with all fields populated
@@ -268,10 +271,18 @@ class ProcessingPipeline:
             url = file_dict["url"]
         except KeyError:
             raise KeyError(f"Required 'url' not provided for file: {file_dict}")
+
         basename = Path(url).stem
-        file_id = file_dict.get("id", basename)
+        id = file_dict.get("id", basename)
         name = file_dict.get("name", basename)
-        return FileData(id=file_id, name=name, url=url)
+
+        # Create a dict of additional fields (excluding known fields)
+        known_fields = {"url", "id", "name"}
+        additional_fields = {
+            k: v for k, v in file_dict.items() if k not in known_fields
+        }
+
+        return FileData(url=url, id=id, name=name, additional_fields=additional_fields)
 
     def _prepare_file_list(self, input_data: Union[Path, List[dict]]) -> List[FileData]:
         """

@@ -370,9 +370,12 @@ class TestConcurrencyAndThreading:
     def test_shutdown_event_propagation(self, mock_sleep):
         """Test that shutdown event stops all threads properly."""
         processing_started = threading.Event()
+        processed_count = 0
 
         class SignalingProcessor(FileWritingProcessor):
             def process(self, file_data: FileData) -> str:
+                nonlocal processed_count
+                processed_count += 1
                 processing_started.set()  # Signal that processing has started
                 return super().process(file_data)
 
@@ -409,9 +412,8 @@ class TestConcurrencyAndThreading:
         # Verify thread completed
         assert not pipeline_thread.is_alive()
 
-        # Verify queues are empty or being drained
-        assert pipeline.download_queue.empty()
-        assert pipeline.post_processing_queue.empty()
+        # Verify that not all files were processed (shutdown worked)
+        assert processed_count < len(test_files)
 
     def test_post_processor_handles_error(self):
         """Test post-processor handles errors gracefully."""
@@ -512,6 +514,93 @@ class TestCommandLineInterface:
             "argument --download-queue-size: 0 is not a positive integer"
             in result.stderr
         )
+
+
+class TestFileDataHandling:
+    """Test FileData creation and handling in the pipeline."""
+
+    def test_create_file_data_with_additional_fields(self, pipeline):
+        """Test creation of FileData with additional fields."""
+        test_dict = {
+            "url": "https://example.com/test.txt",
+            "id": "123",
+            "name": "test.txt",
+            "category": "document",
+            "priority": 1,
+            "tags": ["important", "urgent"],
+        }
+
+        file_data = pipeline.create_file_data(test_dict)
+
+        # Test standard fields
+        assert file_data.url == "https://example.com/test.txt"
+        assert file_data.id == "123"
+        assert file_data.name == "test.txt"
+
+        # Test additional fields
+        assert file_data.category == "document"
+        assert file_data.priority == 1
+        assert file_data.tags == ["important", "urgent"]
+        assert "category" in file_data.additional_fields
+        assert "priority" in file_data.additional_fields
+        assert "tags" in file_data.additional_fields
+
+    def test_create_file_data_minimal(self, pipeline):
+        """Test creation of FileData with only required fields."""
+        test_dict = {"url": "https://example.com/test.txt"}
+
+        file_data = pipeline.create_file_data(test_dict)
+
+        # Test default values
+        assert file_data.url == "https://example.com/test.txt"
+        assert file_data.id == "test"  # Default from URL basename
+        assert file_data.name == "test"  # Default from URL basename
+        assert file_data.additional_fields == {}
+
+    def test_create_file_data_attribute_error(self, pipeline):
+        """Test accessing non-existent additional field raises AttributeError."""
+        test_dict = {"url": "https://example.com/test.txt", "category": "document"}
+
+        file_data = pipeline.create_file_data(test_dict)
+
+        # Test accessing existing additional field
+        assert file_data.category == "document"
+
+        # Test accessing non-existent field
+        with pytest.raises(AttributeError) as exc_info:
+            _ = file_data.nonexistent_field
+        assert "'FileData' object has no attribute 'nonexistent_field'" in str(
+            exc_info.value
+        )
+
+    def test_load_files_from_json_with_additional_fields(self, tmp_path):
+        """Test loading files from JSON with additional fields."""
+        # Create a test JSON file with additional fields
+        json_content = """
+        [
+            {
+                "url": "https://example.com/test1.txt",
+                "id": "1",
+                "name": "test1.txt",
+                "category": "document",
+                "priority": 1
+            },
+            {
+                "url": "https://example.com/test2.txt",
+                "tags": ["important"]
+            }
+        ]
+        """
+        json_file = tmp_path / "test_files.json"
+        json_file.write_text(json_content)
+
+        pipeline = ProcessingPipeline()
+        file_list = pipeline._prepare_file_list(json_file)
+
+        assert len(file_list) == 2
+        assert file_list[0].category == "document"
+        assert file_list[0].priority == 1
+        assert file_list[1].tags == ["important"]
 
 
 class TestFileLoading:
