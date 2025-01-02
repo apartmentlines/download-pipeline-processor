@@ -6,8 +6,12 @@ import pytest
 import requests
 import subprocess
 import threading
+from typing import Any
+from download_pipeline_processor.processors.base_processor import BaseProcessor
+from download_pipeline_processor.processors.base_post_processor import BasePostProcessor
 from download_pipeline_processor.processors.base_pre_processor import BasePreProcessor
 from download_pipeline_processor.processors.dummy_pre_processor import DummyPreProcessor
+from download_pipeline_processor.file_data import FileDataError
 from .test_utils import MockRequestUtils
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +29,138 @@ from .test_processors import (
     ErrorProcessor,
     ErrorPostProcessor,
 )
+
+
+class TestPipelineErrorHandling:
+    """Test error handling in different pipeline stages."""
+
+    @patch("time.sleep")
+    def test_download_error_handling(self, mock_sleep, pipeline):
+        """Test error handling during download stage."""
+        test_files = [
+            {"url": "https://invalid-url.com/nonexistent.txt", "name": "test.txt"}
+        ]
+        pipeline.simulate_downloads = False
+
+        # Mock requests to simulate download error
+        with patch("requests.get") as mock_get:
+            mock_get.side_effect = requests.exceptions.ConnectionError(
+                "Download failed"
+            )
+            result = pipeline.run(test_files)
+
+        # Pipeline should complete despite error
+        assert result == 0
+
+        # Verify error was captured and passed to post-processing
+        post_processed = list(POST_PROCESSOR_OUTPUT_DIR.iterdir())
+        assert len(post_processed) == 0  # No successful processing output
+
+    @patch("time.sleep")
+    def test_pre_processor_error_handling(self, mock_sleep, pipeline):
+        """Test error handling during pre-processing stage."""
+
+        class ErrorPreProcessor(BasePreProcessor):
+            def pre_process(self, file_data: FileData) -> FileData:
+                raise ValueError("Pre-processing error")
+
+        test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
+        pipeline.pre_processor_class = ErrorPreProcessor
+
+        result = pipeline.run(test_files)
+        assert result == 0
+
+        # Verify error was captured
+        assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
+
+    @patch("time.sleep")
+    def test_processor_error_handling(self, mock_sleep, pipeline):
+        """Test error handling during processing stage."""
+
+        class ErrorProcessor(BaseProcessor):
+            def process(self, file_data: FileData) -> None:
+                raise ValueError("Processing error")
+
+        test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
+        pipeline.processor_class = ErrorProcessor
+
+        result = pipeline.run(test_files)
+        assert result == 0
+
+        # Verify error was captured
+        assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
+
+    @patch("time.sleep")
+    def test_error_logging(self, mock_sleep, capsys, pipeline):
+        """Test that errors are properly logged."""
+
+        class ErrorProcessor(BaseProcessor):
+            def process(self, file_data: FileData) -> None:
+                raise ValueError("Test error")
+
+        test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
+        pipeline.processor_class = ErrorProcessor
+
+        pipeline.run(test_files)
+
+        # Verify error was logged to stderr
+        captured = capsys.readouterr()
+        assert "Test error" in captured.err
+        assert "Error processing test.txt" in captured.err
+
+    @patch("time.sleep")
+    def test_continue_after_error(self, mock_sleep, pipeline):
+        """Test pipeline continues processing after errors."""
+
+        class PartialErrorProcessor(FileWritingProcessor):
+            def process(self, file_data: FileData) -> str:
+                if file_data.name == "error.txt":
+                    raise ValueError("Simulated error")
+                return super().process(file_data)
+
+        test_files = [
+            {"url": "https://example.com/test1.txt", "name": "test1.txt"},
+            {"url": "https://example.com/error.txt", "name": "error.txt"},
+            {"url": "https://example.com/test2.txt", "name": "test2.txt"},
+        ]
+        pipeline.processor_class = PartialErrorProcessor
+
+        result = pipeline.run(test_files)
+        assert result == 0
+
+        # Verify successful files were processed
+        processed_files = [f.name for f in PROCESSOR_OUTPUT_DIR.iterdir()]
+        assert len(processed_files) == 2
+        assert "processed_test1.txt" in processed_files
+        assert "processed_test2.txt" in processed_files
+
+    @patch("time.sleep")
+    def test_post_processor_receives_errors(self, mock_sleep, pipeline):
+        """Test that post-processor correctly receives error information."""
+        errors_received = []
+
+        class ErrorTrackingPostProcessor(BasePostProcessor):
+            def post_process(self, result: Any, file_data: FileData) -> None:
+                if file_data.has_error:
+                    errors_received.append(
+                        (file_data.error.stage, str(file_data.error.error))
+                    )
+
+        class ErrorProcessor(BaseProcessor):
+            def process(self, file_data: FileData) -> None:
+                raise ValueError("Test error")
+
+        test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
+        pipeline.processor_class = ErrorProcessor
+        pipeline.post_processor_class = ErrorTrackingPostProcessor
+
+        result = pipeline.run(test_files)
+        assert result == 0
+
+        # Verify error was received by post-processor
+        assert len(errors_received) == 1
+        assert errors_received[0][0] == "process"
+        assert "Test error" in errors_received[0][1]
 
 
 class TestEdgeCasesAndErrorHandling:
@@ -295,7 +431,13 @@ class TestProcessingFunctionality:
         )
         file_data = FileData(url="https://example.com/test.txt", name="test.txt")
         pipeline.process_file(file_data)
-        assert pipeline.post_processing_queue.empty()
+
+        # Check that error tuple was added to queue
+        result, error_file_data = pipeline.post_processing_queue.get_nowait()
+        assert result is None
+        assert error_file_data.has_error
+        assert isinstance(error_file_data.error.error, ValueError)
+        assert "Simulated error processing test.txt" in str(error_file_data.error.error)
 
 
 class TestPreProcessingFunctionality:
@@ -329,7 +471,8 @@ class TestPreProcessingFunctionality:
         processed_files = list(PROCESSOR_OUTPUT_DIR.iterdir())
         assert len(processed_files) == len(test_files)
 
-    def test_pre_processor_error_handling(self):
+    @patch("time.sleep")
+    def test_pre_processor_error_handling(self, mock_sleep):
         """Test pre-processor handles errors gracefully."""
 
         class ErrorPreProcessor(BasePreProcessor):
@@ -610,6 +753,36 @@ class TestCommandLineInterface:
             "argument --download-queue-size: 0 is not a positive integer"
             in result.stderr
         )
+
+
+class TestFileDataError:
+    """Test FileDataError class and error handling functionality."""
+
+    def test_file_data_error_creation(self):
+        """Test creating FileDataError objects."""
+        error = ValueError("Test error")
+        file_error = FileDataError(stage="test", error=error)
+        assert file_error.stage == "test"
+        assert file_error.error == error
+
+    def test_file_data_error_handling(self):
+        """Test error handling in FileData."""
+        file_data = FileData(url="https://example.com/test.txt")
+        assert not file_data.has_error
+        assert file_data.error is None
+
+        # Test adding error
+        error = ValueError("Test error")
+        file_data.add_error("download", error)
+        assert file_data.has_error
+        assert file_data.error.stage == "download"
+        assert file_data.error.error == error
+
+        # Test updating error
+        new_error = RuntimeError("New error")
+        file_data.add_error("process", new_error)
+        assert file_data.error.stage == "process"
+        assert file_data.error.error == new_error
 
 
 class TestFileDataHandling:

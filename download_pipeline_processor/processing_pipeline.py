@@ -113,14 +113,19 @@ class ProcessingPipeline:
                     file_data = self.download_queue.get()
                     if file_data is None:
                         break
-                    self.handle_download(file_data)
-                    self.downloaded_queue.put(file_data)
-                    if self.downloaded_queue.full():
-                        self.log.debug(
-                            "Downloaded queue is full - downloader will block"
-                        )
+                    try:
+                        self.handle_download(file_data)
+                        self.downloaded_queue.put(file_data)
+                        if self.downloaded_queue.full():
+                            self.log.debug(
+                                "Downloaded queue is full - downloader will block"
+                            )
+                    except Exception as e:
+                        self.log.error(f"Failed to download {file_data.name}: {e}")
+                        file_data.add_error("download", e)
+                        self.post_processing_queue.put((None, file_data))
                 except Exception as e:
-                    self.log.error(f"Failed to download {file_data.name}: {e}")
+                    self.log.error(f"Error in download thread: {e}")
         finally:
             self.downloaded_queue.put(None)
             self.log.info("Exiting download thread.")
@@ -218,6 +223,8 @@ class ProcessingPipeline:
                         self.log.debug("Pre-processed queue is full - will block")
                 except Exception as e:
                     self.log.error(f"Error pre-processing {file_data.name}: {e}")
+                    file_data.add_error("pre_process", e)
+                    self.post_processing_queue.put((None, file_data))
         finally:
             self.pre_processed_queue.put(None)
             self.log.info("Exiting pre-processing thread.")
@@ -271,6 +278,8 @@ class ProcessingPipeline:
             self.delete_cached_download_file(file_data)
         except Exception as e:
             self.log.error(f"Error processing {file_data.name}: {e}")
+            file_data.add_error("process", e)
+            self.post_processing_queue.put((None, file_data))
 
     def post_processor(self) -> None:
         """Process the processing results from the post-processing queue."""

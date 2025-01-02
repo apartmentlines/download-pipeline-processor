@@ -98,6 +98,38 @@ download-pipeline-processor --files path/to/files.json --simulate-downloads
 Run `download-pipeline-processor` with the `--help` argument for a description of all arguments.
 
 
+## Error Handling
+
+The pipeline provides built-in error handling at each stage (download, pre-processing, processing, and post-processing). Failed files skip remaining stages and are sent directly to post-processing with error information attached.
+
+#### How It Works
+
+- Processing errors are captured and tracked in the `FileData` object
+- Other files continue processing normally
+- Post-processor receives both successful and failed files
+
+#### Best Practices
+
+1. **In Custom Processors**: Raise exceptions when errors occur - the pipeline will handle them:
+   ```python
+   class CustomProcessor(BaseProcessor):
+       def process(self, file_data: FileData) -> Any:
+           if invalid_condition:
+               raise ValueError("Specific error message")
+           return result
+   ```
+
+2. **In Post-Processors**: Always check for errors before processing:
+   ```python
+   class CustomPostProcessor(BasePostProcessor):
+       def post_process(self, result: Any, file_data: FileData) -> None:
+           if file_data.has_error:
+               self.log.warning(f"Error in {file_data.error.stage}: {file_data.error.error}")
+               return
+           # Handle successful case
+   ```
+
+
 ## Extending the Pipeline
 
 ### Creating Custom Pre-Processors

@@ -4,6 +4,19 @@ from typing import Optional, Union, Dict, Any
 
 
 @dataclass
+class FileDataError:
+    """Error information for a file being processed.
+
+    Attributes:
+        stage (str): The pipeline stage where the error occurred
+        error (Exception): The actual error that occurred
+    """
+
+    stage: str
+    error: Exception
+
+
+@dataclass
 class FileData:
     """Dataclass representing a file to be processed.
 
@@ -13,6 +26,7 @@ class FileData:
         name (Optional[str]): An optional name for the file.
         local_path (Optional[Path]): The local path where the file is stored.
         additional_fields (Dict[str, Any]): A dictionary for storing arbitrary metadata.
+        error (Optional[FileDataError]): Error information if processing failed.
 
     Dynamic Attributes:
         You can add and access arbitrary attributes dynamically. These attributes
@@ -30,6 +44,16 @@ class FileData:
     name: Optional[str] = None
     local_path: Optional[Path] = None
     additional_fields: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[FileDataError] = None
+
+    def add_error(self, stage: str, error: Exception) -> None:
+        """Record an error that occurred during processing."""
+        self.error = FileDataError(stage=stage, error=error)
+
+    @property
+    def has_error(self) -> bool:
+        """Check if any error occurred during processing."""
+        return self.error is not None
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Allow setting arbitrary attributes dynamically."""
