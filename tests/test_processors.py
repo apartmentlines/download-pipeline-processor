@@ -32,11 +32,13 @@ class FileWritingPostProcessor(BasePostProcessor):
         super().__init__(debug=debug)
         self.output_dir = POST_PROCESSOR_OUTPUT_DIR
 
-    def post_process(self, result: str) -> None:
+    def post_process(self, result: str, file_data: FileData) -> None:
         """Write a file to mark post-processing."""
         input_path = Path(result)
         output_path = self.output_dir / input_path.name
-        output_path.write_text(f"Post-processed {input_path.read_text()}")
+        output_path.write_text(
+            f"Post-processed {file_data.name}: {input_path.read_text()}"
+        )
 
 
 class ErrorProcessor(BaseProcessor):

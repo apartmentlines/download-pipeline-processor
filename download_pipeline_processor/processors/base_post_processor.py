@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Any
 
 from .processor import Processor
+from download_pipeline_processor.file_data import FileData
 
 
 class BasePostProcessor(Processor):
@@ -11,7 +12,7 @@ class BasePostProcessor(Processor):
     """
 
     @abstractmethod
-    def post_process(self, result: Any) -> None:
+    def post_process(self, result: Any, file_data: FileData) -> None:
         """
         Post-process the given result.
 

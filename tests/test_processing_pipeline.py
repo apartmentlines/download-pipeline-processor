@@ -367,13 +367,16 @@ class TestPostProcessingFunctionality:
         input_file.write_text("Processed test content")
 
         # Run post-processor
+        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
         post_processor = FileWritingPostProcessor()
-        post_processor.post_process(str(input_file))
+        post_processor.post_process(str(input_file), file_data)
 
         # Verify output file exists with correct content
         output_file = POST_PROCESSOR_OUTPUT_DIR / input_file.name
         assert output_file.exists()
-        assert output_file.read_text() == "Post-processed Processed test content"
+        assert (
+            output_file.read_text() == "Post-processed test.txt: Processed test content"
+        )
 
 
 class TestConcurrencyAndThreading:
@@ -611,6 +614,18 @@ class TestCommandLineInterface:
 
 class TestFileDataHandling:
     """Test FileData creation and handling in the pipeline."""
+
+    def test_dynamic_attributes(self):
+        """Test adding and accessing dynamic attributes."""
+        file_data = FileData(url="https://example.com/file.txt")
+
+        # Test adding and reading dynamic attributes
+        file_data.custom_field = "value"
+        assert file_data.custom_field == "value"
+
+        # Test accessing non-existent attribute
+        with pytest.raises(AttributeError):
+            _ = file_data.non_existent_field
 
     def test_create_file_data_with_additional_fields(self, pipeline):
         """Test creation of FileData with additional fields."""

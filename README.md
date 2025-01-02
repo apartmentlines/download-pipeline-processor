@@ -149,11 +149,41 @@ Example:
 
 ```python
 from download_pipeline_processor.processors.base_post_processor import BasePostProcessor
+from download_pipeline_processor.file_data import FileData
 
 class CustomPostProcessor(BasePostProcessor):
-    def post_process(self, result: Any) -> None:
+    def post_process(self, result: Any, file_data: FileData) -> None:
         # Custom post-processing logic
 ```
+
+### FileData Class
+
+The `FileData` class is the core data structure used throughout the pipeline. It represents a file to be processed and supports both standard and dynamic attributes.
+
+#### Reserved Attributes
+
+##### Set from the passed list of file data
+- `url`
+- `id`
+- `name`
+
+##### Managed internally
+- `local_path`
+- `additional_fields`
+
+#### Dynamic Attributes
+You can add and access arbitrary attributes dynamically. These attributes are stored in the `additional_fields` dictionary but can be accessed as if they were direct attributes of the object.
+
+Example:
+
+```python
+file_data = FileData(url="https://example.com/file.txt")
+file_data.custom_field = "value"  # Dynamically add an attribute
+print(file_data.custom_field)     # Access the attribute
+```
+
+Note:
+- Accessing non-existent attributes raises an `AttributeError`
 
 
 ## Architecture Overview
