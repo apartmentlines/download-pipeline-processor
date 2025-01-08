@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import requests
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, List, Optional, Type, Union
@@ -126,6 +127,7 @@ class ProcessingPipeline:
                         self.post_processing_queue.put((None, file_data))
                 except Exception as e:
                     self.log.error(f"Error in download thread: {e}")
+                    traceback.print_exc()
         finally:
             self.downloaded_queue.put(None)
             self.log.info("Exiting download thread.")
@@ -253,6 +255,7 @@ class ProcessingPipeline:
                 future.result()
             except Exception as e:
                 self.log.error(f"Error in processing task: {e}")
+                traceback.print_exc()
 
         self.log.info("Exiting processing thread.")
 
