@@ -1,5 +1,5 @@
 [project]
-name = "download_pipeline_processor"
+name = "download-pipeline-processor"
 version = "0.1.0"
 description = "A multi-threaded processing pipeline for downloading and processing files"
 authors = [
