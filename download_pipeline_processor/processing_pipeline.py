@@ -16,6 +16,7 @@ import threading
 import time
 import requests
 import traceback
+from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, List, Optional, Type, Union
@@ -166,8 +167,9 @@ class ProcessingPipeline:
             with open(temp_path, "wb") as f:
                 f.write(response.content)
             file_data.local_path = temp_path
+            stripped_url = urlunparse(urlparse(file_data.url)._replace(query=''))
             self.log.info(
-                f"Downloaded {file_data.name} from {file_data.url} to {file_data.local_path}"
+                f"Downloaded {file_data.name} from {stripped_url} to {file_data.local_path}"
             )
         except Exception as e:
             if temp_path.exists():
