@@ -84,6 +84,7 @@ class ProcessingPipeline:
         self.download_cache = download_cache
         self.download_cache.mkdir(parents=True, exist_ok=True)
 
+        self.thread_local = threading.local()
         self.executor: Optional[ThreadPoolExecutor] = None
         self.download_queue: queue.Queue[Optional[FileData]] = queue.Queue()
         self.downloaded_queue: queue.Queue[Optional[FileData]] = queue.Queue(
@@ -167,7 +168,7 @@ class ProcessingPipeline:
             with open(temp_path, "wb") as f:
                 f.write(response.content)
             file_data.local_path = temp_path
-            stripped_url = urlunparse(urlparse(file_data.url)._replace(query=''))
+            stripped_url = urlunparse(urlparse(file_data.url)._replace(query=""))
             self.log.info(
                 f"Downloaded {file_data.name} from {stripped_url} to {file_data.local_path}"
             )
@@ -233,6 +234,17 @@ class ProcessingPipeline:
             self.pre_processed_queue.put(None)
             self.log.info("Exiting pre-processing thread.")
 
+    def _initialize_worker(self) -> None:
+        """Initialize worker thread with its own Processor backend."""
+        self.thread_local.processor = self._initialize_processor()
+
+    def _initialize_processor(self) -> BaseProcessor:
+        """Initialize the processor backend for the worker thread.
+
+        :return: Processor
+        """
+        return self.processor_class(debug=self.debug)
+
     def processing_consumer(self) -> None:
         """Consumer that pulls from downloaded_queue and submits processing tasks."""
         file_count = 0
@@ -272,9 +284,8 @@ class ProcessingPipeline:
                     f"Shutdown event set. Skipping processing for {file_data.name}"
                 )
                 return
-            processor = self.processor_class(debug=self.debug)
             self.log.debug(f"Starting processing for {file_data.name}")
-            processing_result = processor.process(file_data)
+            processing_result = self.thread_local.processor.process(file_data)
             self.log.info(f"Finished processing for {file_data.name}")
             self.post_processing_queue.put((processing_result, file_data))
             self.log.debug(
@@ -411,7 +422,11 @@ class ProcessingPipeline:
             name="Processor",
         )
 
-        with ThreadPoolExecutor(max_workers=self.processing_limit) as executor:
+        with ThreadPoolExecutor(
+            max_workers=self.processing_limit,
+            thread_name_prefix="ProcessingWorker",
+            initializer=self._initialize_worker,
+        ) as executor:
             self.executor = executor
 
             download_thread.start()
