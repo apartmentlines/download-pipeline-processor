@@ -52,6 +52,7 @@ class ErrorProcessor(BaseProcessor):
 class ErrorPostProcessor(BasePostProcessor):
     """Test post-processor that raises an exception."""
 
-    def post_process(self, result: Any) -> None:
+    def post_process(self, result: Any, file_data: FileData) -> None:
         """Always raise an exception."""
+        del file_data
         raise ValueError(f"Simulated error post-processing {result}")

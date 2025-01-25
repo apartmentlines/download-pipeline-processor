@@ -257,11 +257,12 @@ class ProcessingPipeline:
                     self.log.info(f"All {file_count} files submitted for processing.")
                     break
                 file_count += 1
-                future = self.executor.submit(self.process_file, file_data)
-                active_futures.append(future)
-                self.log.debug(
-                    f"Submitted processing task for {file_data.name}. Active tasks: {len(active_futures)}"
-                )
+                if self.executor:
+                    future = self.executor.submit(self.process_file, file_data)
+                    active_futures.append(future)
+                    self.log.debug(
+                        f"Submitted processing task for {file_data.name}. Active tasks: {len(active_futures)}"
+                    )
             except Exception as e:
                 self.log.error(f"Error processing downloaded file: {e}")
         for future in active_futures:

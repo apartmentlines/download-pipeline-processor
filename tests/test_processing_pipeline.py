@@ -135,19 +135,24 @@ class TestPipelineErrorHandling:
         assert "processed_test2.txt" in processed_files
 
     @patch("time.sleep")
-    def test_post_processor_receives_errors(self, mock_sleep, pipeline):
+    def test_post_processor_receives_errors(self, pipeline):
         """Test that post-processor correctly receives error information."""
         errors_received = []
 
         class ErrorTrackingPostProcessor(BasePostProcessor):
             def post_process(self, result: Any, file_data: FileData) -> None:
+                del result
                 if file_data.has_error:
                     errors_received.append(
-                        (file_data.error.stage, str(file_data.error.error))
+                        (
+                            getattr(file_data.error, "stage", "unknown"),
+                            str(getattr(file_data.error, "error", "unknown error")),
+                        )
                     )
 
         class ErrorProcessor(BaseProcessor):
             def process(self, file_data: FileData) -> None:
+                del file_data
                 raise ValueError("Test error")
 
         test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
@@ -378,7 +383,9 @@ class TestDownloadFunctionality:
     @patch("time.sleep")
     def test_simulate_download(self, mock_sleep, pipeline):
         """Test simulated download functionality."""
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        file_data = FileData(
+            id=123, url="https://example.com/test.txt", name="test.txt"
+        )
         pipeline.simulate_download(file_data)
         assert file_data.local_path is not None
         assert file_data.local_path.name == "test.txt"
@@ -398,7 +405,10 @@ class TestDownloadFunctionality:
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
         file_data = FileData(
-            url="https://example.com/test.txt", name="test.txt", local_path=test_file
+            id=123,
+            url="https://example.com/test.txt",
+            name="test.txt",
+            local_path=test_file,
         )
 
         # Test with simulate_downloads=True (should not delete)
@@ -417,7 +427,9 @@ class TestProcessingFunctionality:
 
     def test_process_file(self, pipeline):
         """Test processing of a single file."""
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        file_data = FileData(
+            id=123, url="https://example.com/test.txt", name="test.txt"
+        )
         # Create processor directly to test just the processing logic
         processor = pipeline.processor_class()
         result = processor.process(file_data)
@@ -429,7 +441,9 @@ class TestProcessingFunctionality:
         pipeline = ProcessingPipeline(
             processor_class=ErrorProcessor, simulate_downloads=True
         )
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        file_data = FileData(
+            id=123, url="https://example.com/test.txt", name="test.txt"
+        )
         pipeline.process_file(file_data)
 
         # Check that error tuple was added to queue
@@ -445,13 +459,15 @@ class TestPreProcessingFunctionality:
 
     def test_pre_processor_handles_file(self, pipeline):
         """Test pre-processor processes files correctly."""
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        file_data = FileData(
+            id=123, url="https://example.com/test.txt", name="test.txt"
+        )
         pre_processor = pipeline.pre_processor_class(debug=True)
         processed_data = pre_processor.pre_process(file_data)
         assert processed_data == file_data  # For DummyPreProcessor
 
     @patch("time.sleep")
-    def test_pre_processing_queue_behavior(self, mock_sleep, pipeline):
+    def test_pre_processing_queue_behavior(self, pipeline):
         """Test pre-processing queue size limits are respected."""
         # Create test data with more files than queue size
         test_files = [
@@ -472,7 +488,7 @@ class TestPreProcessingFunctionality:
         assert len(processed_files) == len(test_files)
 
     @patch("time.sleep")
-    def test_pre_processor_error_handling(self, mock_sleep):
+    def test_pre_processor_error_handling(self):
         """Test pre-processor handles errors gracefully."""
 
         class ErrorPreProcessor(BasePreProcessor):
@@ -510,7 +526,9 @@ class TestPostProcessingFunctionality:
         input_file.write_text("Processed test content")
 
         # Run post-processor
-        file_data = FileData(url="https://example.com/test.txt", name="test.txt")
+        file_data = FileData(
+            id=123, url="https://example.com/test.txt", name="test.txt"
+        )
         post_processor = FileWritingPostProcessor()
         post_processor.post_process(str(input_file), file_data)
 
@@ -526,7 +544,7 @@ class TestConcurrencyAndThreading:
     """Test concurrent processing behavior of the pipeline."""
 
     @patch("time.sleep")
-    def test_concurrent_downloads_and_processing(self, mock_sleep):
+    def test_concurrent_downloads_and_processing(self):
         """Test that downloads and processing occur concurrently."""
         # Track pre-processing operations
         pre_processed_files = set()
@@ -574,7 +592,7 @@ class TestConcurrencyAndThreading:
         assert len(post_processed_files) == 5
 
     @patch("time.sleep")
-    def test_download_queue_full_behavior(self, mock_sleep):
+    def test_download_queue_full_behavior(self):
         """Test pipeline behavior when download queue is full."""
         # Create test data
         test_files = [
@@ -606,7 +624,7 @@ class TestConcurrencyAndThreading:
         assert len(processed_files) == 4
 
     @patch("time.sleep")
-    def test_shutdown_event_propagation(self, mock_sleep):
+    def test_shutdown_event_propagation(self):
         """Test that shutdown event stops all threads properly."""
         processing_started = threading.Event()
         processed_count = 0
@@ -659,14 +677,17 @@ class TestConcurrencyAndThreading:
         post_processor = ErrorPostProcessor()
         test_result = "Test Result"
         with pytest.raises(ValueError, match="Simulated error post-processing"):
-            post_processor.post_process(test_result)
+            post_processor.post_process(
+                test_result,
+                FileData(id=123, name="test.txt", url="https://example.com/test.txt"),
+            )
 
 
 class TestCommandLineInterface:
     """Test command-line interface functionality."""
 
     @patch("time.sleep")
-    def test_cli_default_arguments(self, mock_sleep, temp_json_file):
+    def test_cli_default_arguments(self, temp_json_file):
         """Test pipeline execution via CLI with default arguments."""
         env = os.environ.copy()
         env[NO_SLEEP_ENV_VAR] = "1"
@@ -767,7 +788,9 @@ class TestFileDataError:
 
     def test_file_data_error_handling(self):
         """Test error handling in FileData."""
-        file_data = FileData(url="https://example.com/test.txt")
+        file_data = FileData(
+            id=123, name="test.txt", url="https://example.com/test.txt"
+        )
         assert not file_data.has_error
         assert file_data.error is None
 
@@ -775,14 +798,14 @@ class TestFileDataError:
         error = ValueError("Test error")
         file_data.add_error("download", error)
         assert file_data.has_error
-        assert file_data.error.stage == "download"
-        assert file_data.error.error == error
+        assert getattr(file_data.error, "stage", "unknown") == "download"
+        assert getattr(file_data.error, "error", "unknown error") == error
 
         # Test updating error
         new_error = RuntimeError("New error")
         file_data.add_error("process", new_error)
-        assert file_data.error.stage == "process"
-        assert file_data.error.error == new_error
+        assert getattr(file_data.error, "stage", "unknown") == "process"
+        assert getattr(file_data.error, "error", "unknown error") == new_error
 
 
 class TestFileDataHandling:
@@ -790,7 +813,9 @@ class TestFileDataHandling:
 
     def test_dynamic_attributes(self):
         """Test adding and accessing dynamic attributes."""
-        file_data = FileData(url="https://example.com/file.txt")
+        file_data = FileData(
+            id=123, name="file.txt", url="https://example.com/file.txt"
+        )
 
         # Test adding and reading dynamic attributes
         file_data.custom_field = "value"

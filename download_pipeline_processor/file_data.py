@@ -22,8 +22,8 @@ class FileData:
 
     Attributes:
         url (str): The URL of the file.
-        id (Optional[Union[str, int]]): An optional identifier for the file.
-        name (Optional[str]): An optional name for the file.
+        id (Union[str, int]): An optional identifier for the file.
+        name (str): An optional name for the file.
         local_path (Optional[Path]): The local path where the file is stored.
         additional_fields (Dict[str, Any]): A dictionary for storing arbitrary metadata.
         error (Optional[FileDataError]): Error information if processing failed.
@@ -40,8 +40,8 @@ class FileData:
     """
 
     url: str
-    id: Optional[Union[str, int]] = None
-    name: Optional[str] = None
+    id: Union[str, int]
+    name: str
     local_path: Optional[Path] = None
     additional_fields: Dict[str, Any] = field(default_factory=dict)
     error: Optional[FileDataError] = None
