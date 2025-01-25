@@ -14,10 +14,12 @@ from download_pipeline_processor.processors.dummy_pre_processor import DummyPreP
 from download_pipeline_processor.file_data import FileDataError
 from .test_utils import MockRequestUtils
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from download_pipeline_processor.file_data import FileData
 from download_pipeline_processor.processing_pipeline import ProcessingPipeline
 from download_pipeline_processor.constants import (
+    DEFAULT_MAX_RETRIES,
     DEFAULT_PROCESSING_LIMIT,
     DEFAULT_DOWNLOAD_QUEUE_SIZE,
     NO_SLEEP_ENV_VAR,
@@ -31,8 +33,327 @@ from .test_processors import (
 )
 
 
-class TestPipelineErrorHandling:
+class TestDownloadRetries:
+    """Test that the download function retries on failure."""
+
+    @patch("time.sleep")
+    def test_download_retries_on_failure(self, _, monkeypatch):
+        """Test that download_file retries the correct number of times upon failure."""
+        from download_pipeline_processor import constants
+
+        max_retries = 3  # Set the desired number of retries
+        monkeypatch.setattr(constants, "DEFAULT_MAX_RETRIES", max_retries)
+
+        # Create a counter to track the number of attempts
+        attempts = []
+
+        def mock_requests_get(*args, **kwargs):
+            del args, kwargs
+            attempts.append(1)
+            raise requests.exceptions.ConnectionError("Simulated connection error")
+
+        # Mock requests.get to always raise a ConnectionError
+        with patch("requests.get", side_effect=mock_requests_get):
+            pipeline = ProcessingPipeline(simulate_downloads=False)
+            file_data = FileData(
+                id="1", name="test1.txt", url="https://example.com/test1.txt"
+            )
+
+            # Run the download_file method
+            with pytest.raises(requests.exceptions.ConnectionError):
+                pipeline.download_file(file_data)
+
+            # Check that requests.get was called the correct number of times
+            assert len(attempts) == max_retries
+
+            # Verify that file_data.local_path is None (since download failed)
+            assert file_data.local_path is None
+
+
+class TestDownloadTimeoutHandling:
+    """Test that download timeouts are handled correctly."""
+
+    @patch("time.sleep")
+    def test_download_timeout_handling(self, _):
+        """Test that download_file retries upon timeouts and handles them correctly."""
+
+        # Create a counter to track the number of attempts
+        attempts = []
+
+        def mock_requests_get(*args, **kwargs):
+            del args, kwargs
+            attempts.append(1)
+            raise requests.exceptions.Timeout("Simulated timeout error")
+
+        # Mock requests.get to always raise a Timeout error
+        with patch("requests.get", side_effect=mock_requests_get):
+            pipeline = ProcessingPipeline(simulate_downloads=False)
+            file_data = FileData(
+                id="1", name="test1.txt", url="https://example.com/test1.txt"
+            )
+
+            # Run the download_file method
+            with pytest.raises(requests.exceptions.Timeout):
+                pipeline.download_file(file_data)
+
+            # Check that requests.get was called the correct number of times
+            assert len(attempts) == DEFAULT_MAX_RETRIES
+
+            # Verify that file_data.local_path is None (since download failed)
+            assert file_data.local_path is None
+
+
+class TestTemporaryFileCleanup:
+    """Test that temporary files are cleaned up after download failures."""
+
+    @patch("time.sleep")
+    def test_temporary_file_cleanup_on_download_failure(self, _, tmp_path, monkeypatch):
+        """Ensure that temporary files are deleted if download fails."""
+        from download_pipeline_processor import constants
+
+        max_retries = 1  # Set retries to 1 for faster test
+        monkeypatch.setattr(constants, "DEFAULT_MAX_RETRIES", max_retries)
+
+        temp_file_paths = []
+
+        # We'll wrap create_cached_download_filepath to capture temp_path
+        original_create_cached_download_filepath = (
+            ProcessingPipeline.create_cached_download_filepath
+        )
+
+        def create_cached_download_filepath(self, file_data):
+            temp_path = original_create_cached_download_filepath(self, file_data)
+            temp_file_paths.append(temp_path)
+            return temp_path
+
+        def mock_requests_get(*args, **kwargs):
+            del args, kwargs
+            raise requests.exceptions.ConnectionError("Simulated connection error")
+
+        # Mock requests.get to always raise a ConnectionError
+        with (
+            patch("requests.get", side_effect=mock_requests_get),
+            patch.object(
+                ProcessingPipeline,
+                "create_cached_download_filepath",
+                create_cached_download_filepath,
+            ),
+        ):
+
+            pipeline = ProcessingPipeline(
+                simulate_downloads=False, download_cache=tmp_path
+            )
+            file_data = FileData(
+                id="1", name="test1.txt", url="https://example.com/test1.txt"
+            )
+
+            # Run the download_file method
+            with pytest.raises(requests.exceptions.ConnectionError):
+                pipeline.download_file(file_data)
+
+            # Verify that the temporary file was cleaned up
+            for temp_path in temp_file_paths:
+                assert (
+                    not temp_path.exists()
+                ), f"Temporary file {temp_path} was not deleted."
+
+    """Test the initialization of worker threads and processors."""
+
+
+class TestWorkerInitialization:
+
+    @patch("time.sleep")
+    def test_initialize_worker(self, _):
+        """Test that each worker thread initializes its own processor."""
+        from threading import current_thread
+
+        # Tracking variables
+        initialization_count = 0
+        thread_processor_ids = {}
+
+        class TrackingProcessor(BaseProcessor):
+            def __init__(self, debug: bool = False) -> None:
+                nonlocal initialization_count
+                super().__init__(debug)
+                initialization_count += 1
+                # Record the processor instance ID for the current thread
+                thread_id = current_thread().ident
+                thread_processor_ids[thread_id] = id(self)
+
+            def process(self, file_data: FileData) -> Any:
+                return f"Processed {file_data.name}"
+
+        processing_limit = 3  # Use multiple worker threads
+
+        pipeline = ProcessingPipeline(
+            processor_class=TrackingProcessor,
+            simulate_downloads=True,
+            processing_limit=processing_limit,
+        )
+
+        # Create test data with enough files to require multiple threads
+        test_files = [
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
+            for i in range(6)
+        ]
+
+        pipeline.run(test_files)
+
+        # Assert that _initialize_worker was called once per worker thread
+        assert initialization_count == processing_limit
+
+        # Assert that each thread has its own processor instance
+        assert len(thread_processor_ids) == processing_limit
+        assert len(set(thread_processor_ids.values())) == processing_limit
+
+
+class TestProcessorReuseWithinThread:
+    """Test that the same processor instance is reused within a thread."""
+
+    @patch("time.sleep")
+    def test_processor_reuse_within_thread(self, _):
+        from threading import current_thread
+
+        # Tracking variables
+        processor_instances = {}
+
+        class TrackingProcessor(BaseProcessor):
+            def __init__(self, debug: bool = False) -> None:
+                super().__init__(debug)
+                self.process_calls = 0
+                # Record the processor instance for the thread
+                thread_id = current_thread().ident
+                processor_instances.setdefault(thread_id, self)
+
+            def process(self, file_data: FileData) -> Any:
+                self.process_calls += 1
+                return f"Processed {file_data.name}"
+
+        processing_limit = 2  # Use multiple worker threads
+
+        pipeline = ProcessingPipeline(
+            processor_class=TrackingProcessor,
+            simulate_downloads=True,
+            processing_limit=processing_limit,
+        )
+
+        # Create test data
+        test_files = [
+            {
+                "id": str(i),
+                "name": f"test{i}.txt",
+                "url": f"https://example.com/test{i}.txt",
+            }
+            for i in range(4)
+        ]
+
+        pipeline.run(test_files)
+
+        # Verify that each processor instance processed multiple files
+        for processor in set(processor_instances.values()):
+            assert processor.process_calls > 0
+
+        # Verify total process call count matches number of files
+        total_process_calls = sum(
+            p.process_calls for p in set(processor_instances.values())
+        )
+        assert total_process_calls == len(test_files)
+
+
+class TestProcessorDebugFlag:
+    """Test that processors are initialized with the correct debug flag."""
+
+    @patch("time.sleep")
+    def test_processor_debug_flag(self, _):
+        """Test that processors receive the correct debug flag upon initialization."""
+        # Tracking variable
+        debug_flags = []
+
+        class DebugFlagProcessor(BaseProcessor):
+            def __init__(self, debug: bool = False) -> None:
+                super().__init__(debug)
+                debug_flags.append(debug)
+
+            def process(self, file_data: FileData) -> Any:
+                return f"Processed {file_data.name}"
+
+        pipeline = ProcessingPipeline(
+            processor_class=DebugFlagProcessor,
+            simulate_downloads=True,
+            debug=True,
+            processing_limit=2,
+        )
+
+        test_files = [
+            {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"}
+        ]
+
+        pipeline.run(test_files)
+
+        # Verify that all processor instances have debug=True
+        assert all(flag is True for flag in debug_flags)
+
+
+class TestThreadPoolExecutorInitialization:
+    """Test ThreadPoolExecutor initialization in the pipeline."""
+
+    @patch("time.sleep")
+    def test_thread_pool_executor_initialization(self, _):
+        """Test that ThreadPoolExecutor is initialized with the correct parameters."""
+
+        # We'll create a subclass of ThreadPoolExecutor to capture initialization parameters
+        class CustomThreadPoolExecutor(ThreadPoolExecutor):
+            def __init__(self, *args, **kwargs):
+                self.captured_args = args
+                self.captured_kwargs = kwargs
+                super().__init__(*args, **kwargs)
+
+        # Patch the ProcessingPipeline to use CustomThreadPoolExecutor
+        original_run_method = ProcessingPipeline.run
+
+        def run_with_custom_executor(self, input_data):
+            del input_data
+            with CustomThreadPoolExecutor(
+                max_workers=self.processing_limit,
+                thread_name_prefix="ProcessingWorker",
+                initializer=self._initialize_worker,
+            ) as executor:
+                self.executor = executor
+                return 0
+
+        try:
+            ProcessingPipeline.run = run_with_custom_executor
+
+            pipeline = ProcessingPipeline(
+                simulate_downloads=True,
+                processing_limit=2,
+            )
+
+            pipeline.run([])
+
+            # Retrieve the captured executor parameters
+            executor: CustomThreadPoolExecutor = (
+                pipeline.executor
+            )  # pyright: ignore[reportAssignmentType]
+            assert (
+                executor.captured_kwargs.get("initializer")
+                == pipeline._initialize_worker
+            )
+            assert (
+                executor.captured_kwargs.get("thread_name_prefix") == "ProcessingWorker"
+            )
+        finally:
+            # Restore the original run method and ThreadPoolExecutor
+            ProcessingPipeline.run = original_run_method
+
     """Test error handling in different pipeline stages."""
+
+
+class TestPipelineErrorHandling:
 
     @patch("time.sleep")
     def test_download_error_handling(self, _, pipeline):
