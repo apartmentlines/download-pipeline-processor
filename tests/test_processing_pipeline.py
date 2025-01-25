@@ -35,7 +35,7 @@ class TestPipelineErrorHandling:
     """Test error handling in different pipeline stages."""
 
     @patch("time.sleep")
-    def test_download_error_handling(self, mock_sleep, pipeline):
+    def test_download_error_handling(self, pipeline):
         """Test error handling during download stage."""
         test_files = [
             {"url": "https://invalid-url.com/nonexistent.txt", "name": "test.txt"}
@@ -57,11 +57,12 @@ class TestPipelineErrorHandling:
         assert len(post_processed) == 0  # No successful processing output
 
     @patch("time.sleep")
-    def test_pre_processor_error_handling(self, mock_sleep, pipeline):
+    def test_pre_processor_error_handling(self, pipeline):
         """Test error handling during pre-processing stage."""
 
         class ErrorPreProcessor(BasePreProcessor):
             def pre_process(self, file_data: FileData) -> FileData:
+                del file_data
                 raise ValueError("Pre-processing error")
 
         test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
@@ -74,11 +75,12 @@ class TestPipelineErrorHandling:
         assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
 
     @patch("time.sleep")
-    def test_processor_error_handling(self, mock_sleep, pipeline):
+    def test_processor_error_handling(self, pipeline):
         """Test error handling during processing stage."""
 
         class ErrorProcessor(BaseProcessor):
             def process(self, file_data: FileData) -> None:
+                del file_data
                 raise ValueError("Processing error")
 
         test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
@@ -91,11 +93,12 @@ class TestPipelineErrorHandling:
         assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
 
     @patch("time.sleep")
-    def test_error_logging(self, mock_sleep, capsys, pipeline):
+    def test_error_logging(self, capsys, pipeline):
         """Test that errors are properly logged."""
 
         class ErrorProcessor(BaseProcessor):
             def process(self, file_data: FileData) -> None:
+                del file_data
                 raise ValueError("Test error")
 
         test_files = [{"url": "https://example.com/test.txt", "name": "test.txt"}]
@@ -109,7 +112,7 @@ class TestPipelineErrorHandling:
         assert "Error processing test.txt" in captured.err
 
     @patch("time.sleep")
-    def test_continue_after_error(self, mock_sleep, pipeline):
+    def test_continue_after_error(self, pipeline):
         """Test pipeline continues processing after errors."""
 
         class PartialErrorProcessor(FileWritingProcessor):
@@ -172,7 +175,7 @@ class TestEdgeCasesAndErrorHandling:
     """Test edge cases and error handling in the pipeline."""
 
     @patch("time.sleep")
-    def test_empty_file_list(self, mock_sleep, pipeline, tmp_path):
+    def test_empty_file_list(self, pipeline, tmp_path):
         """Test pipeline handles empty file list correctly."""
         # Test with empty list
         result = pipeline.run([])
@@ -185,14 +188,14 @@ class TestEdgeCasesAndErrorHandling:
         assert result == 0
 
     @patch("time.sleep")
-    def test_invalid_urls(self, mock_sleep, pipeline, monkeypatch):
+    def test_invalid_urls(self, pipeline, monkeypatch):
         """Test pipeline handles invalid URLs appropriately."""
         test_file = FileData(
             id="1", name="test1.txt", url="https://invalid-url.com/test1.txt"
         )
 
         # Mock requests.get to simulate a connection error
-        def mock_failed_request(*args, **kwargs):
+        def mock_failed_request():
             raise requests.exceptions.ConnectionError("Simulated connection error")
 
         monkeypatch.setattr(requests, "get", mock_failed_request)
@@ -208,22 +211,22 @@ class TestEdgeCasesAndErrorHandling:
         assert test_file.local_path is None
 
     @patch("time.sleep")
-    def test_exception_handling(self, mock_sleep, pipeline):
+    def test_exception_handling(self, pipeline):
         """Test pipeline handles various exceptions without crashing."""
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"}
         ]
 
         # Test download exception
-        def mock_download(*args, **kwargs):
+        def mock_download():
             raise Exception("Simulated download error")
 
         # Test processing exception
-        def mock_process(*args, **kwargs):
+        def mock_process():
             raise Exception("Simulated processing error")
 
         # Test post-processing exception
-        def mock_post_process(*args, **kwargs):
+        def mock_post_process():
             raise Exception("Simulated post-processing error")
 
         # Run with each type of error
@@ -248,7 +251,7 @@ class TestPipelineExecutionFlow:
     """Test the complete execution flow of the pipeline."""
 
     @patch("time.sleep")
-    def test_end_to_end_execution(self, mock_sleep, pipeline):
+    def test_end_to_end_execution(self, pipeline):
         """Test complete pipeline execution with file artifacts."""
         # Track pre-processing calls
         pre_processed_files = set()
@@ -308,7 +311,7 @@ class TestPipelineExecutionFlow:
         )
 
     @patch("time.sleep")
-    def test_graceful_shutdown(self, mock_sleep, pipeline, tmp_path, monkeypatch):
+    def test_graceful_shutdown(self, pipeline, monkeypatch):
         """Test that pipeline shuts down gracefully after completion."""
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"}
@@ -332,7 +335,7 @@ class TestPipelineExecutionFlow:
 class TestPipelineInitialization:
     """Test ProcessingPipeline initialization."""
 
-    def test_logging_configuration(self, tmp_path):
+    def test_logging_configuration(self):
         # Test processor logging
         processor = FileWritingProcessor(debug=True)
         assert processor.log.level == logging.DEBUG
@@ -381,7 +384,7 @@ class TestDownloadFunctionality:
     """Test download functionality of the pipeline."""
 
     @patch("time.sleep")
-    def test_simulate_download(self, mock_sleep, pipeline):
+    def test_simulate_download(self, pipeline):
         """Test simulated download functionality."""
         file_data = FileData(
             id=123, url="https://example.com/test.txt", name="test.txt"

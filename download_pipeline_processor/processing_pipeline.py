@@ -342,7 +342,7 @@ class ProcessingPipeline:
 
         return FileData(url=url, id=id, name=name, additional_fields=additional_fields)
 
-    def _prepare_file_list(self, input_data: Union[Path, List[dict]]) -> List[FileData]:
+    def _prepare_file_list(self, input_data: Union[Path, List[dict]] | None) -> List[FileData]:
         """
         Prepare a list of FileData objects from either a Path to a JSON file or a list of dicts.
 

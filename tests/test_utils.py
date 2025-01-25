@@ -7,7 +7,7 @@ class MockRequestUtils:
     """Mock request utilities for testing."""
 
     @staticmethod
-    def mock_successful_request(*args, **kwargs):
+    def mock_successful_request():
         """Helper method to mock successful requests."""
 
         class MockResponse:
@@ -21,7 +21,7 @@ class MockRequestUtils:
         return MockResponse()
 
     @staticmethod
-    def mock_failed_request(*args, **kwargs):
+    def mock_failed_request():
         """Helper method to mock failed requests."""
 
         class MockResponse:
