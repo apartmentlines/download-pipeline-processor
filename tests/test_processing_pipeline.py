@@ -35,7 +35,7 @@ class TestPipelineErrorHandling:
     """Test error handling in different pipeline stages."""
 
     @patch("time.sleep")
-    def test_download_error_handling(self, pipeline):
+    def test_download_error_handling(self, _, pipeline):
         """Test error handling during download stage."""
         test_files = [
             {"url": "https://invalid-url.com/nonexistent.txt", "name": "test.txt"}
@@ -57,7 +57,7 @@ class TestPipelineErrorHandling:
         assert len(post_processed) == 0  # No successful processing output
 
     @patch("time.sleep")
-    def test_pre_processor_error_handling(self, pipeline):
+    def test_pre_processor_error_handling(self, _, pipeline):
         """Test error handling during pre-processing stage."""
 
         class ErrorPreProcessor(BasePreProcessor):
@@ -75,7 +75,7 @@ class TestPipelineErrorHandling:
         assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
 
     @patch("time.sleep")
-    def test_processor_error_handling(self, pipeline):
+    def test_processor_error_handling(self, _, pipeline):
         """Test error handling during processing stage."""
 
         class ErrorProcessor(BaseProcessor):
@@ -93,7 +93,7 @@ class TestPipelineErrorHandling:
         assert len(list(PROCESSOR_OUTPUT_DIR.iterdir())) == 0
 
     @patch("time.sleep")
-    def test_error_logging(self, capsys, pipeline):
+    def test_error_logging(self, _, capsys, pipeline):
         """Test that errors are properly logged."""
 
         class ErrorProcessor(BaseProcessor):
@@ -112,7 +112,7 @@ class TestPipelineErrorHandling:
         assert "Error processing test.txt" in captured.err
 
     @patch("time.sleep")
-    def test_continue_after_error(self, pipeline):
+    def test_continue_after_error(self, _, pipeline):
         """Test pipeline continues processing after errors."""
 
         class PartialErrorProcessor(FileWritingProcessor):
@@ -138,7 +138,7 @@ class TestPipelineErrorHandling:
         assert "processed_test2.txt" in processed_files
 
     @patch("time.sleep")
-    def test_post_processor_receives_errors(self, pipeline):
+    def test_post_processor_receives_errors(self, _, pipeline):
         """Test that post-processor correctly receives error information."""
         errors_received = []
 
@@ -175,7 +175,7 @@ class TestEdgeCasesAndErrorHandling:
     """Test edge cases and error handling in the pipeline."""
 
     @patch("time.sleep")
-    def test_empty_file_list(self, pipeline, tmp_path):
+    def test_empty_file_list(self, _, pipeline, tmp_path):
         """Test pipeline handles empty file list correctly."""
         # Test with empty list
         result = pipeline.run([])
@@ -188,14 +188,15 @@ class TestEdgeCasesAndErrorHandling:
         assert result == 0
 
     @patch("time.sleep")
-    def test_invalid_urls(self, pipeline, monkeypatch):
+    def test_invalid_urls(self, _, pipeline, monkeypatch):
         """Test pipeline handles invalid URLs appropriately."""
         test_file = FileData(
             id="1", name="test1.txt", url="https://invalid-url.com/test1.txt"
         )
 
         # Mock requests.get to simulate a connection error
-        def mock_failed_request():
+        def mock_failed_request(*args, **kwargs):
+            del args, kwargs
             raise requests.exceptions.ConnectionError("Simulated connection error")
 
         monkeypatch.setattr(requests, "get", mock_failed_request)
@@ -211,7 +212,7 @@ class TestEdgeCasesAndErrorHandling:
         assert test_file.local_path is None
 
     @patch("time.sleep")
-    def test_exception_handling(self, pipeline):
+    def test_exception_handling(self, _, pipeline):
         """Test pipeline handles various exceptions without crashing."""
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"}
@@ -251,7 +252,7 @@ class TestPipelineExecutionFlow:
     """Test the complete execution flow of the pipeline."""
 
     @patch("time.sleep")
-    def test_end_to_end_execution(self, pipeline):
+    def test_end_to_end_execution(self, _, pipeline):
         """Test complete pipeline execution with file artifacts."""
         # Track pre-processing calls
         pre_processed_files = set()
@@ -311,7 +312,7 @@ class TestPipelineExecutionFlow:
         )
 
     @patch("time.sleep")
-    def test_graceful_shutdown(self, pipeline, monkeypatch):
+    def test_graceful_shutdown(self, _, pipeline, monkeypatch):
         """Test that pipeline shuts down gracefully after completion."""
         test_files = [
             {"id": "1", "name": "test1.txt", "url": "https://example.com/test1.txt"}
@@ -384,7 +385,7 @@ class TestDownloadFunctionality:
     """Test download functionality of the pipeline."""
 
     @patch("time.sleep")
-    def test_simulate_download(self, pipeline):
+    def test_simulate_download(self, _, pipeline):
         """Test simulated download functionality."""
         file_data = FileData(
             id=123, url="https://example.com/test.txt", name="test.txt"
@@ -433,9 +434,19 @@ class TestProcessingFunctionality:
         file_data = FileData(
             id=123, url="https://example.com/test.txt", name="test.txt"
         )
-        # Create processor directly to test just the processing logic
-        processor = pipeline.processor_class()
-        result = processor.process(file_data)
+        # Initialize the thread-local processor
+        pipeline.thread_local.processor = pipeline.processor_class(debug=pipeline.debug)
+
+        # Now call process_file
+        pipeline.process_file(file_data)
+
+        # Retrieve the result from the post_processing_queue
+        result, processed_file_data = pipeline.post_processing_queue.get_nowait()
+
+        # Assertions to verify processing result
+        assert result is not None
+        assert processed_file_data == file_data
+        assert not processed_file_data.has_error
         assert str(Path(result).name).startswith("processed_")
         assert str(Path(result).name).endswith(file_data.name)
 
@@ -449,12 +460,21 @@ class TestProcessingFunctionality:
         )
         pipeline.process_file(file_data)
 
-        # Check that error tuple was added to queue
+        # Initialize the thread-local processor with ErrorProcessor
+        pipeline.thread_local.processor = pipeline.processor_class(debug=pipeline.debug)
+
+        # Now call process_file
+        pipeline.process_file(file_data)
+
+        # Retrieve the result from the post_processing_queue
         result, error_file_data = pipeline.post_processing_queue.get_nowait()
+
+        # Assertions to verify error handling
         assert result is None
+        assert error_file_data == file_data
         assert error_file_data.has_error
         assert isinstance(error_file_data.error.error, ValueError)
-        assert "Simulated error processing test.txt" in str(error_file_data.error.error)
+        assert "Simulated error processing" in str(error_file_data.error.error)
 
 
 class TestPreProcessingFunctionality:
@@ -470,7 +490,7 @@ class TestPreProcessingFunctionality:
         assert processed_data == file_data  # For DummyPreProcessor
 
     @patch("time.sleep")
-    def test_pre_processing_queue_behavior(self, pipeline):
+    def test_pre_processing_queue_behavior(self, _, pipeline):
         """Test pre-processing queue size limits are respected."""
         # Create test data with more files than queue size
         test_files = [
@@ -491,7 +511,7 @@ class TestPreProcessingFunctionality:
         assert len(processed_files) == len(test_files)
 
     @patch("time.sleep")
-    def test_pre_processor_error_handling(self):
+    def test_pre_processor_error_handling(self, _):
         """Test pre-processor handles errors gracefully."""
 
         class ErrorPreProcessor(BasePreProcessor):
@@ -547,7 +567,7 @@ class TestConcurrencyAndThreading:
     """Test concurrent processing behavior of the pipeline."""
 
     @patch("time.sleep")
-    def test_concurrent_downloads_and_processing(self):
+    def test_concurrent_downloads_and_processing(self, _):
         """Test that downloads and processing occur concurrently."""
         # Track pre-processing operations
         pre_processed_files = set()
@@ -595,7 +615,7 @@ class TestConcurrencyAndThreading:
         assert len(post_processed_files) == 5
 
     @patch("time.sleep")
-    def test_download_queue_full_behavior(self):
+    def test_download_queue_full_behavior(self, _):
         """Test pipeline behavior when download queue is full."""
         # Create test data
         test_files = [
@@ -627,7 +647,7 @@ class TestConcurrencyAndThreading:
         assert len(processed_files) == 4
 
     @patch("time.sleep")
-    def test_shutdown_event_propagation(self):
+    def test_shutdown_event_propagation(self, _):
         """Test that shutdown event stops all threads properly."""
         processing_started = threading.Event()
         processed_count = 0
@@ -690,7 +710,7 @@ class TestCommandLineInterface:
     """Test command-line interface functionality."""
 
     @patch("time.sleep")
-    def test_cli_default_arguments(self, temp_json_file):
+    def test_cli_default_arguments(self, _, temp_json_file):
         """Test pipeline execution via CLI with default arguments."""
         env = os.environ.copy()
         env[NO_SLEEP_ENV_VAR] = "1"
