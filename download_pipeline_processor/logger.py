@@ -1,3 +1,4 @@
+import os
 import logging
 
 STREAM_FORMAT = "%(asctime)s [%(threadName)s] %(levelname)s: %(message)s"
@@ -5,7 +6,7 @@ FILE_FORMAT = "%(asctime)s [%(threadName)s] %(levelname)s: %(message)s"
 
 
 class Logger:
-    def __new__(cls, name, log_file=None, debug=False):
+    def __new__(cls, name: str, log_file: str | None = None, debug: bool = False) -> logging.Logger:
         """
         Setup instance-specific logger.
 
@@ -28,6 +29,7 @@ class Logger:
         handler.setFormatter(logging.Formatter(STREAM_FORMAT))
         logger.addHandler(handler)
 
+        log_file = log_file or os.getenv("DOWNLOAD_PIPELINE_PROCESSOR_LOG_FILE")
         if log_file:
             log_file_handler = logging.FileHandler(log_file, "a")
             handler.setLevel(level)

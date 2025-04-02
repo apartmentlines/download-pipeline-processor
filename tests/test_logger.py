@@ -1,3 +1,4 @@
+import os
 import logging
 from download_pipeline_processor.logger import Logger, STREAM_FORMAT, FILE_FORMAT
 
@@ -14,9 +15,23 @@ def test_logger_initialization_debug():
     assert logger.level == logging.DEBUG
     assert logger.handlers[0].level == logging.DEBUG
 
-def test_logger_initialization_with_log_file(tmp_path):
+def test_logger_initialization_with_log_file_arg(tmp_path):
     log_file = tmp_path / 'test.log'
     logger = Logger('test_logger', log_file=str(log_file))
+    assert len(logger.handlers) == 2
+    # Check for StreamHandler
+    assert any(isinstance(h, logging.StreamHandler) for h in logger.handlers)
+    # Check for FileHandler
+    assert any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+    log_file.unlink()
+
+def test_logger_initialization_with_log_file_env_var(tmp_path):
+    log_file = tmp_path / 'test.log'
+    try:
+        os.environ['DOWNLOAD_PIPELINE_PROCESSOR_LOG_FILE'] = str(log_file)
+        logger = Logger('test_logger')
+    finally:
+        del os.environ['DOWNLOAD_PIPELINE_PROCESSOR_LOG_FILE']
     assert len(logger.handlers) == 2
     # Check for StreamHandler
     assert any(isinstance(h, logging.StreamHandler) for h in logger.handlers)
